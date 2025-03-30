@@ -14,7 +14,6 @@ scp root@$host:/etc/rancher/k3s/k3s.yaml ~/.kube/config
 sed -i "s/127.0.0.1/$host/g" ~/.kube/config
 ```
 
-
 ## Kubernetes Dashboard
 
 ```sh
