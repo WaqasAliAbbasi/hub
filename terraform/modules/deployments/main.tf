@@ -4,10 +4,6 @@ terraform {
       source  = "hashicorp/helm"
       version = "3.0.0-pre2"
     }
-    remote = {
-      source  = "tenstad/remote"
-      version = "0.1.3"
-    }
     kubernetes = {
       source  = "hashicorp/kubernetes"
       version = "2.36.0"

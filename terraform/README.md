@@ -5,19 +5,17 @@ terraform init -backend-config="access_key=" -backend-config="secret_key="
 terraform apply
 ```
 
-## How to access via kubectl?
+## K9s / kubectl
 
 ```sh
-terraform output hub_password
-host=$(terraform output -raw hub_ip_address)
-scp root@$host:/etc/rancher/k3s/k3s.yaml ~/.kube/config
-sed -i "s/127.0.0.1/$host/g" ~/.kube/config
+brew install siderolabs/tap/talosctl kubectl k9s
+terraform output --raw hub_kubeconfig_raw > ~/.kube/config
+k9s
 ```
 
-## Kubernetes Dashboard
+## Dashboard
 
 ```sh
-# Use this in the UI
-terraform output admin_user_service_account_token
-kubectl port-forward svc/kubernetes-dashboard-kong-proxy 8443:443
+terraform output --raw talos_config_raw > ~/.talos/config
+talosctl dashboard -e $(terraform output --raw hub_ip) -n $(terraform output --raw hub_ip)
 ```
