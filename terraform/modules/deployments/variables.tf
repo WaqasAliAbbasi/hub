@@ -1,4 +1,8 @@
-variable "kubernetes_host" {
+variable "kubernetes_endpoint" {
+
+}
+
+variable "host_ip_address" {
 
 }
 

@@ -8,3 +8,6 @@ variable "cluster_name" {
 variable "do_plan_control_plane" {
   default = "s-1vcpu-2gb"
 }
+variable "talos_version" {
+  default = "1.9.5"
+}

@@ -12,17 +12,17 @@ output "talos_config_raw" {
   value     = data.talos_client_configuration.talosconfig.talos_config
 }
 
-output "client_certificate" {
-  value     = base64decode(talos_machine_secrets.machine_secrets.client_configuration.client_certificate)
-  sensitive = true
+output "kubernetes_host" {
+  value      = talos_cluster_kubeconfig.kubeconfig.kubernetes_client_configuration.host
+  depends_on = [talos_machine_bootstrap.bootstrap]
 }
 
-output "client_key" {
-  value     = base64decode(talos_machine_secrets.machine_secrets.client_configuration.client_key)
-  sensitive = true
+output "kubernetes_client_certificate" {
+  value = base64decode(talos_cluster_kubeconfig.kubeconfig.kubernetes_client_configuration.client_certificate)
 }
-
-output "ca_certificate" {
-  value     = base64decode(talos_machine_secrets.machine_secrets.client_configuration.ca_certificate)
-  sensitive = true
+output "kubernetes_client_key" {
+  value = base64decode(talos_cluster_kubeconfig.kubeconfig.kubernetes_client_configuration.client_key)
+}
+output "kubernetes_ca_certificate" {
+  value = base64decode(talos_cluster_kubeconfig.kubeconfig.kubernetes_client_configuration.ca_certificate)
 }

@@ -8,11 +8,6 @@ output "hub_ip" {
   value = module.talos_cluster.hub_ip
 }
 
-output "hub_kubeconfig" {
-  sensitive = true
-  value     = module.talos_cluster.hub_kubeconfig
-}
-
 output "hub_kubeconfig_raw" {
   value     = module.talos_cluster.hub_kubeconfig.kubeconfig_raw
   sensitive = true

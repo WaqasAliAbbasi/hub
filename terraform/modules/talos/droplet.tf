@@ -1,7 +1,7 @@
 ## Upload a custom image to DigitalOcean
 resource "digitalocean_custom_image" "talos_custom_image" {
-  name         = "talos-linux-1.9.5"
-  url          = "https://factory.talos.dev/image/376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba/v1.9.5/digital-ocean-amd64.raw.gz"
+  name         = "talos-linux-${var.talos_version}"
+  url          = "https://factory.talos.dev/image/376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba/v${var.talos_version}/digital-ocean-amd64.raw.gz"
   distribution = "Unknown OS"
   regions      = ["${var.do_region}"]
 }
@@ -40,17 +40,27 @@ data "talos_machine_configuration" "machineconfig_cp" {
   machine_type     = "controlplane"
   machine_secrets  = talos_machine_secrets.machine_secrets.machine_secrets
   depends_on       = [digitalocean_droplet.talos_control_plane]
+  talos_version    = var.talos_version
+  config_patches = [
+    file("${path.module}/files/machine-config.yaml"),
+  ]
 }
 
 resource "talos_machine_configuration_apply" "cp_config_apply" {
   client_configuration        = talos_machine_secrets.machine_secrets.client_configuration
   machine_configuration_input = data.talos_machine_configuration.machineconfig_cp.machine_configuration
   node                        = digitalocean_droplet.talos_control_plane.ipv4_address
+  timeouts = {
+    create = "1m"
+  }
 }
 
 resource "talos_machine_bootstrap" "bootstrap" {
   client_configuration = talos_machine_secrets.machine_secrets.client_configuration
   node                 = digitalocean_droplet.talos_control_plane.ipv4_address
+  timeouts = {
+    create = "1m"
+  }
 }
 
 resource "talos_cluster_kubeconfig" "kubeconfig" {
