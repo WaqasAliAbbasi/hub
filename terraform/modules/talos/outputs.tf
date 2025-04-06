@@ -14,7 +14,7 @@ output "talos_config_raw" {
 
 output "kubernetes_host" {
   value      = talos_cluster_kubeconfig.kubeconfig.kubernetes_client_configuration.host
-  depends_on = [talos_machine_bootstrap.bootstrap]
+  depends_on = [null_resource.wait_for_host]
 }
 
 output "kubernetes_client_certificate" {

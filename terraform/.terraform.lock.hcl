@@ -91,6 +91,26 @@ provider "registry.terraform.io/hashicorp/kubernetes" {
   ]
 }
 
+provider "registry.terraform.io/hashicorp/null" {
+  version     = "3.2.4-alpha.2"
+  constraints = "3.2.4-alpha.2"
+  hashes = [
+    "h1:yJT/62HU/KJzx4C7aWifxh2dGf/EiqEQWm3//bQwj8A=",
+    "zh:051a048b59ae2243267eced51b1c935178f6fa5f734289f53ef2663abb967825",
+    "zh:07c8d248d9ddc25feefabe5804e86b98e67608f8066a8c654be74d95713ee35b",
+    "zh:337b599daee7c7d75fdc3053d82408970e523349fda35abdfabce3bc03eb9ecd",
+    "zh:475a9cba6cf929705ca1997e8ce6a1225b7a39507e1a54c19d00dd1dc0b26320",
+    "zh:49c1aaa176b54095c09b088a1419f8f1600b259ce33dc361b6014133a5a93ad2",
+    "zh:646d4ab99d6fa16bd2ef91133de772083e0c43e097f6244ccfa9f659e8ce1914",
+    "zh:69559c54e28cda1b0c75f2201c679d067f0c4151df23d97f074345561e33ddf8",
+    "zh:75e67a5d5bf22869f996d0f32421cbb4b604f30bfff036454a439fdd91f81ef5",
+    "zh:78d5eefdd9e494defcb3c68d282b8f96630502cac21d1ea161f53cfe9bb483b3",
+    "zh:84f37ac8c790849b32d834589d0320e94b6d3080f1a4a36a861eafdfb8d52bed",
+    "zh:e425580a55f65b47155acf3152c9af1d6dcfbc918bd978545afd699426afc13e",
+    "zh:f3439f85cb372f09c7dcec6495e855d5d80a73508a457428fb7c19386bf9c24d",
+  ]
+}
+
 provider "registry.terraform.io/hashicorp/tls" {
   version     = "4.0.6"
   constraints = "4.0.6"

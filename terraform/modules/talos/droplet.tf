@@ -67,3 +67,18 @@ resource "talos_cluster_kubeconfig" "kubeconfig" {
   client_configuration = talos_machine_secrets.machine_secrets.client_configuration
   node                 = digitalocean_droplet.talos_control_plane.ipv4_address
 }
+
+resource "null_resource" "wait_for_host" {
+  depends_on = [
+    talos_machine_bootstrap.bootstrap,
+    talos_machine_configuration_apply.cp_config_apply,
+  ]
+  provisioner "local-exec" {
+    command = <<EOT
+      until nc -z -w 5 ${digitalocean_droplet.talos_control_plane.ipv4_address} 6443; do
+        echo "Waiting for port 6443 on ${digitalocean_droplet.talos_control_plane.ipv4_address} to be available..."
+        sleep 5
+      done
+    EOT
+  }
+}
