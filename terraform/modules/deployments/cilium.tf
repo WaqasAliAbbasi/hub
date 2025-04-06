@@ -36,21 +36,15 @@ resource "helm_release" "cilium" {
       value = "/sys/fs/cgroup"
   }]
 }
-
-resource "kubernetes_manifest" "cilium_loadbalancer_ip_pool" {
+resource "kubectl_manifest" "cilium_load_balancer_ip_pool" {
   depends_on = [helm_release.cilium]
-  manifest = {
-    apiVersion = "cilium.io/v2alpha1"
-    kind       = "CiliumLoadBalancerIPPool"
-    metadata = {
-      name = "blue-pool"
-    }
-    spec = {
-      blocks = [
-        {
-          start = var.host_ip_address
-        }
-      ]
-    }
-  }
+  yaml_body  = <<YAML
+apiVersion: "cilium.io/v2alpha1"
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: "blue-pool"
+spec:
+  blocks:
+  - start: "${var.hub_ip}"
+YAML
 }
