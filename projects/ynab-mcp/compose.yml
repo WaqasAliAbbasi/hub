@@ -1,0 +1,53 @@
+name: ynab-mcp
+
+# One container. The server is itself an OAuth 2.1 Authorization Server
+# (Dynamic Client Registration + PKCE, via the MCP SDK), so there is no auth
+# proxy in front of it — Traefik only terminates TLS and routes.
+#
+# Auth is YNAB's own OAuth: you authorize at YNAB's consent screen and the
+# server stores an encrypted per-user refresh token. There is deliberately no
+# YNAB Personal Access Token here — nothing on this box holds a long-lived,
+# all-budgets, full-write credential.
+services:
+  ynab-mcp:
+    image: ghcr.io/auzroz/ynab-mcp:0.3.3
+    restart: always
+    # YNAB_OAUTH_CLIENT_ID, YNAB_OAUTH_CLIENT_SECRET, ENCRYPTION_KEY
+    # (ENCRYPTION_KEY = `openssl rand -base64 32`; changing it orphans every
+    # stored token and forces everyone to re-authorize.)
+    env_file: .env
+    environment:
+      - MCP_TRANSPORT=http
+      - PORT=3000
+      - PUBLIC_URL=https://ynab.waqasali.dev
+      # Offer read-write at the YNAB consent screen. The scope is chosen when
+      # you authorize, so this is a ceiling, not a grant.
+      - YNAB_OAUTH_ALLOW_WRITE=true
+      # Default driver is `memory`, which silently loses every token on
+      # restart. sqlite under ./data survives deploys and gets backed up.
+      - STORAGE_DRIVER=sqlite
+      - SQLITE_PATH=/data/ynab-mcp.db
+      - ENABLE_DNS_REBINDING_PROTECTION=true
+      - ALLOWED_HOSTS=ynab.waqasali.dev
+      - ALLOWED_ORIGINS=https://ynab.waqasali.dev
+      # One hop: Traefik. Without this, per-client rate limiting buckets every
+      # request under Traefik's container IP instead of the real caller.
+      - TRUST_PROXY=1
+    volumes:
+      - ./data:/data
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.ynab-mcp.rule=Host(`ynab.waqasali.dev`)
+      - traefik.http.routers.ynab-mcp.tls.certresolver=le
+      - traefik.http.services.ynab-mcp.loadbalancer.server.port=3000
+      # Deliberately NOT admin-auth@file: a basic-auth prompt in front of this
+      # returns 401s that Claude's OAuth handshake cannot answer.
+    networks:
+      - edge
+    mem_limit: 256m
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  edge:
+    external: true
