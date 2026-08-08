@@ -1,0 +1,25 @@
+name: freshrss
+
+services:
+  freshrss:
+    image: freshrss/freshrss:latest
+    restart: always
+    environment:
+      - TZ=UTC
+      - CRON_MIN=1,31
+    volumes:
+      - ./data:/var/www/FreshRSS/data
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.freshrss.rule=Host(`rss.waqasali.dev`)
+      - traefik.http.routers.freshrss.tls.certresolver=le
+      - traefik.http.services.freshrss.loadbalancer.server.port=80
+    networks:
+      - edge
+    mem_limit: 512m
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  edge:
+    external: true

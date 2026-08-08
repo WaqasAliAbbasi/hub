@@ -1,0 +1,88 @@
+name: deploy
+
+# Reusable workflow for shipping a project onto the hub box. An app repo calls
+# this in ~10 lines instead of reimplementing build/push/ship/verify itself —
+# see docs/new-project.md for the calling side.
+#
+# The app repo's compose.yml must reference its image as
+# `ghcr.io/<repo>:${IMAGE_TAG}` — this workflow substitutes IMAGE_TAG with the
+# git SHA before shipping it, so every deploy is pinned to a specific build
+# and a rollback is just re-running an old workflow run.
+on:
+  workflow_call:
+    inputs:
+      project:
+        description: "Directory name under /srv on the box, and the compose project name"
+        required: true
+        type: string
+      compose-path:
+        description: "Path to the compose file in the calling repo"
+        required: false
+        type: string
+        default: compose.yml
+      host:
+        description: "Hostname the app serves (e.g. rss.waqasali.dev), used for the post-deploy healthcheck"
+        required: true
+        type: string
+      build:
+        description: "Build and push an image from this repo. Set false for a compose file that only references pre-built images (e.g. an upstream project like FreshRSS)."
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      SSH_HOST:
+        required: true
+      SSH_KEY:
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        if: inputs.build
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        if: inputs.build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+
+      - name: Ship compose file and deploy
+        env:
+          IMAGE_TAG: sha-${{ github.sha }}
+        run: |
+          set -eu
+          install -m 700 -d ~/.ssh
+          install -m 600 /dev/stdin ~/.ssh/id_deploy <<< "${{ secrets.SSH_KEY }}"
+          ssh_opts="-o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy"
+
+          envsubst '$IMAGE_TAG' < "${{ inputs.compose-path }}" > /tmp/compose.yml
+
+          ssh $ssh_opts "deploy@${{ secrets.SSH_HOST }}" "mkdir -p /srv/${{ inputs.project }}"
+          scp $ssh_opts /tmp/compose.yml "deploy@${{ secrets.SSH_HOST }}:/srv/${{ inputs.project }}/compose.yml"
+          ssh $ssh_opts "deploy@${{ secrets.SSH_HOST }}" \
+            "cd /srv/${{ inputs.project }} && docker compose pull && docker compose up -d --remove-orphans"
+
+      - name: Verify
+        run: |
+          set -eu
+          for i in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "https://${{ inputs.host }}" || true)
+            if [ "$code" != "000" ]; then
+              echo "==> https://${{ inputs.host }} responded $code"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "no response from https://${{ inputs.host }} after 60s" >&2
+          exit 1
