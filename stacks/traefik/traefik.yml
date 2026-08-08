@@ -1,0 +1,64 @@
+# Traefik static configuration. Changes here need a container restart
+# (`make platform`); anything in dynamic/ is watched and reloaded live.
+
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+
+  websecure:
+    address: ":443"
+    http:
+      middlewares:
+        # Applied to every router. Individual services can override by declaring
+        # their own middleware chain on their router.
+        - security-headers@file
+
+  # Internal only — no port mapping in compose.yml, so this is reachable from the
+  # container's own healthcheck and nothing else.
+  internal:
+    address: ":8080"
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    # Nothing is routed unless it explicitly sets traefik.enable=true. Without
+    # this, every container that happens to expose a port gets published.
+    exposedByDefault: false
+    network: edge
+    watch: true
+
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+certificatesResolvers:
+  le:
+    acme:
+      email: waqas.abbasi@outlook.com
+      storage: /acme/acme.json
+      httpChallenge:
+        entryPoint: web
+
+ping:
+  entryPoint: internal
+
+log:
+  level: INFO
+
+accessLog:
+  filters:
+    # Successful requests are noise here; Dozzle is for reading these and disk is
+    # finite. 4xx/5xx and slow requests are what you actually want to see.
+    statusCodes:
+      - "400-599"
+    minDuration: "2s"

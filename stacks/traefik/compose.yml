@@ -1,0 +1,39 @@
+name: platform
+
+services:
+  traefik:
+    image: traefik:v3.7
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Read-only, but note this is still root-equivalent access to the host for
+      # anything that compromises Traefik. The hardening step is a socket proxy
+      # exposing only the container-list endpoints; not worth it yet, but it is
+      # the first thing to add if this box ever hosts anything sensitive.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./dynamic:/etc/traefik/dynamic:ro
+      - ./admin-users:/etc/traefik/admin-users:ro
+      # Named volume, not a bind mount: Traefik creates acme.json at 0600 and
+      # refuses to start if the permissions are wider.
+      - acme:/acme
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: 256m
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  acme:
+
+networks:
+  edge:
+    external: true

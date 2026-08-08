@@ -1,9 +1,0 @@
-# Copy this file to terraform.tfvars and fill in your values
-
-digitalocean_token = "your_digitalocean_api_token_here"
-region            = "sgp1"
-droplet_size      = "s-1vcpu-2gb"
-domain            = "waqasali.dev"
-
-# SSH public key - leave empty to use ~/.ssh/id_rsa.pub automatically
-# ssh_public_key = "ssh-rsa AAAAB3NzaC1yc2..."

@@ -1,15 +1,78 @@
 #cloud-config
+# Base image for the hub box: Docker, a deploy user, and the /srv layout.
+# Deliberately contains no application config — platform stacks are synced
+# separately (see the Makefile), so this file changes almost never.
+#
+# Hard rule: nothing gets added here after day one. cloud-init only runs on first
+# boot — Hetzner has no "re-run cloud-init," so any edit here forces Terraform to
+# destroy and recreate the server to take effect. Anything needed on an existing
+# box (a package, a systemd unit, a timer) goes in `ops/` instead and is applied
+# over SSH by `make provision` — see ops/provision.sh. This file is a record of
+# day-one bootstrap, not a place to iterate.
 
 package_update: true
 package_upgrade: true
 
 packages:
+  - ca-certificates
   - curl
+  - gnupg
+  - rsync
+  - fail2ban
+  - unattended-upgrades
 
-write_files: []
+users:
+  - default
+  - name: deploy
+    shell: /bin/bash
+    # No sudo: this account exists to run `docker compose` from CI, and membership
+    # of the docker group is already root-equivalent. Adding sudo buys nothing and
+    # widens what a leaked deploy key gets you.
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+# Everything below is either order-dependent on first boot (Docker must exist before
+# the `edge` network or the `docker` group grant) or needed the moment sshd starts.
+# Anything that's just a config file with no such dependency — the Docker daemon
+# log caps, the prune timer, journald caps, unattended-upgrades, the fail2ban jail —
+# lives in ops/ instead and is applied by `make provision`, so it can be tuned
+# without rebuilding the box. See ops/provision.sh.
+write_files:
+  - path: /etc/ssh/sshd_config.d/99-hub.conf
+    content: |
+      PasswordAuthentication no
+      PermitRootLogin prohibit-password
+      KbdInteractiveAuthentication no
 
 runcmd:
-  # Install K3s
-  - curl -sfL https://get.k3s.io | sh -
+  # cloud-init's own package_upgrade may still hold the apt lock.
+  - [ sh, -c, "while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do sleep 2; done" ]
 
-final_message: "K3s cluster is ready!"
+  # Docker from the official repository rather than get.docker.com, so unattended
+  # security upgrades keep it patched.
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - [ sh, -c, 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list' ]
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+  - usermod -aG docker deploy
+  - systemctl enable --now docker fail2ban
+  - systemctl restart fail2ban ssh
+
+  # Deliberately no sops and no age key here. Secrets are decrypted on your
+  # laptop by `make sync` and arrive as plaintext files at 0600 — this box holds
+  # nothing that can decrypt the repo, so rebuilding it costs no secrets. See
+  # README's Secrets section.
+
+  # The shared proxy network. Every project attaches to this so Traefik can reach
+  # it; the project's own default network stays private to its stack.
+  - [ sh, -c, "docker network inspect edge >/dev/null 2>&1 || docker network create edge" ]
+
+  # One directory per project. Everything stateful lives in <project>/data so the
+  # backup job is a single rule rather than one per service.
+  - mkdir -p /srv/platform
+  - chown -R deploy:deploy /srv
+
+final_message: "hub is ready after $UPTIME seconds"
