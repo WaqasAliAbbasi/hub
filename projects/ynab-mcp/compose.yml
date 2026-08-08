@@ -12,6 +12,12 @@ services:
   ynab-mcp:
     image: ghcr.io/auzroz/ynab-mcp:0.3.3
     restart: always
+    # The image runs as its own `mcp` user (uid 1001), but ./data is created by
+    # the deploy workflow as `deploy` (uid 1000) — so the container lands on the
+    # directory's "other" permissions, cannot write, and sqlite fails with
+    # "unable to open database file". Run as the owner instead; chown is not an
+    # option because `deploy` deliberately has no sudo.
+    user: "1000:1000"
     # YNAB_OAUTH_CLIENT_ID, YNAB_OAUTH_CLIENT_SECRET, ENCRYPTION_KEY
     # (ENCRYPTION_KEY = `openssl rand -base64 32`; changing it orphans every
     # stored token and forces everyone to re-authorize.)

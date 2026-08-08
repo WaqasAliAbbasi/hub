@@ -92,10 +92,12 @@ secrets stay laptop-only: CI already has a root-equivalent deploy key and can
 read any `.env` on the box, but it has no way to reach the Hetzner/DigitalOcean
 tokens or the restic password.
 
-If the app stores anything under `./data` and runs as a non-root user, check the
-uid matches — the workflow creates `/srv/<project>/data` as `deploy`, and a
-container running as a different uid cannot write to it. Set `user:` in the
-compose file to match if they differ.
+If the app writes to `./data` and its image runs as a non-root user, add
+`user: "1000:1000"` to the service. The workflow creates `/srv/<project>/data`
+as `deploy` (uid 1000), and an image with its own baked-in user — most of them,
+on some other uid — falls through to the directory's "other" permissions and
+cannot write. The symptom is a permission or "unable to open" error on startup,
+looping via `restart: always`. `chown` is not the fix: `deploy` has no sudo.
 
 ## 4. First deploy
 
