@@ -73,7 +73,31 @@ jobs:
 private key — ask whoever holds it; it is never committed anywhere. Both are repo secrets
 on the app repo, not on `hub`.
 
-## 3. First deploy
+## 3. Secrets (only if the app needs them)
+
+Commit them encrypted, next to the compose file that consumes them:
+
+```sh
+make secrets FILE=projects/<project>/secrets.enc.env   # opens $EDITOR, encrypts on save
+```
+
+Point the workflow at it with `secrets-path:` and pass `SOPS_AGE_KEY`, as
+`deploy-ynab-mcp.yml` does. On every deploy the workflow decrypts it to
+`/srv/<project>/.env` at 0600 — before `docker compose up` — so `env_file: .env`
+in the compose file just works. Nothing is placed on the box by hand.
+
+This needs `make secrets-ci-init`, once ever, which mints a second age key that
+only CI holds and scopes it to `projects/**`. The Terraform and platform-stack
+secrets stay laptop-only: CI already has a root-equivalent deploy key and can
+read any `.env` on the box, but it has no way to reach the Hetzner/DigitalOcean
+tokens or the restic password.
+
+If the app stores anything under `./data` and runs as a non-root user, check the
+uid matches — the workflow creates `/srv/<project>/data` as `deploy`, and a
+container running as a different uid cannot write to it. Set `user:` in the
+compose file to match if they differ.
+
+## 4. First deploy
 
 Push to `main`. The workflow builds the image, pushes it to GHCR, copies `compose.yml` to
 `/srv/<project>/` on the box, and runs `docker compose up -d` there. The final step polls

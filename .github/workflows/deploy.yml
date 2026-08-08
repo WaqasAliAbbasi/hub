@@ -29,11 +29,19 @@ on:
         required: false
         type: boolean
         default: true
+      secrets-path:
+        description: "Path to a sops-encrypted env file in the calling repo. Decrypted to /srv/<project>/.env if SOPS_AGE_KEY is supplied. Skipped when the file does not exist."
+        required: false
+        type: string
+        default: secrets.enc.env
     secrets:
       SSH_HOST:
         required: true
       SSH_KEY:
         required: true
+      SOPS_AGE_KEY:
+        description: "Age private key that can decrypt secrets-path. Only needed by projects that have secrets."
+        required: false
 
 jobs:
   deploy:
@@ -60,6 +68,8 @@ jobs:
       - name: Ship compose file and deploy
         env:
           IMAGE_TAG: sha-${{ github.sha }}
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+          SECRETS_PATH: ${{ inputs.secrets-path }}
         run: |
           set -eu
           install -m 700 -d ~/.ssh
@@ -68,8 +78,28 @@ jobs:
 
           envsubst '$IMAGE_TAG' < "${{ inputs.compose-path }}" > /tmp/compose.yml
 
-          ssh $ssh_opts "deploy@${{ secrets.SSH_HOST }}" "mkdir -p /srv/${{ inputs.project }}"
+          # `data` alongside: Docker would otherwise create a missing bind-mount
+          # source as root, which a container running as a non-root user cannot
+          # write to. Created by `deploy`, which owns the rest of /srv/<project>.
+          ssh $ssh_opts "deploy@${{ secrets.SSH_HOST }}" \
+            "mkdir -p /srv/${{ inputs.project }}/data"
           scp $ssh_opts /tmp/compose.yml "deploy@${{ secrets.SSH_HOST }}:/srv/${{ inputs.project }}/compose.yml"
+
+          # Only projects that have both an encrypted file and the key to open it.
+          # The plaintext is piped straight to a 0600 file on the box and never
+          # written to the runner's disk.
+          if [ -f "$SECRETS_PATH" ] && [ -n "${SOPS_AGE_KEY:-}" ]; then
+            echo "==> decrypting $SECRETS_PATH to /srv/${{ inputs.project }}/.env"
+            curl -fsSL -o /tmp/sops \
+              https://github.com/getsops/sops/releases/download/v3.13.3/sops-v3.13.3.linux.amd64
+            chmod +x /tmp/sops
+            /tmp/sops -d "$SECRETS_PATH" | ssh $ssh_opts "deploy@${{ secrets.SSH_HOST }}" \
+              "umask 077 && cat > /srv/${{ inputs.project }}/.env"
+          elif [ -f "$SECRETS_PATH" ]; then
+            echo "$SECRETS_PATH exists but no SOPS_AGE_KEY was passed to this workflow" >&2
+            exit 1
+          fi
+
           ssh $ssh_opts "deploy@${{ secrets.SSH_HOST }}" \
             "cd /srv/${{ inputs.project }} && docker compose pull && docker compose up -d --remove-orphans"
 

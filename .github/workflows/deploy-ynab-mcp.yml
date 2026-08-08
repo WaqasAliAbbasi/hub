@@ -7,6 +7,7 @@ on:
     branches: [main]
     paths:
       - projects/ynab-mcp/compose.yml
+      - projects/ynab-mcp/secrets.enc.env
 
 jobs:
   deploy:
@@ -14,8 +15,10 @@ jobs:
     with:
       project: ynab-mcp
       compose-path: projects/ynab-mcp/compose.yml
+      secrets-path: projects/ynab-mcp/secrets.enc.env
       host: ynab.waqasali.dev
       build: false
     secrets:
       SSH_HOST: ${{ secrets.HUB_SSH_HOST }}
       SSH_KEY: ${{ secrets.HUB_SSH_KEY }}
+      SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}

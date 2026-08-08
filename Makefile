@@ -12,7 +12,7 @@ HUB_IP    = $(shell $(TFENV) '$(TF) output -raw server_ipv4' 2>/dev/null)
 SSH       = ssh deploy@$(HUB_IP)
 ROOT_SSH  = ssh root@$(HUB_IP)
 
-.PHONY: help secrets-init secrets init fmt validate plan apply destroy ip ssh sync platform up logs ps disk prune provision
+.PHONY: help secrets-init secrets-ci-init secrets init fmt validate plan apply destroy ip ssh sync platform up logs ps disk prune provision
 
 help:
 	@echo "First time only:"
@@ -35,6 +35,7 @@ help:
 	@echo ""
 	@echo "Secrets:"
 	@echo "  make secrets FILE=stacks/backup/secrets.enc.env   edit (or create) one secret"
+	@echo "  make secrets-ci-init                              let CI decrypt projects/ secrets (once)"
 
 # --------------------------------------------------------------------- secrets
 
@@ -42,8 +43,17 @@ help:
 # sops command in this file needs no flags, no --age, and no .sops.yaml editing.
 # Back the private key up to your password manager: it is the only thing that can
 # decrypt the *.enc* files committed here, and nothing else holds a copy.
+#
+# Refuses to overwrite an existing .sops.yaml. It is a one-time bootstrap, and
+# `secrets-ci-init` adds a second recipient that a blind rewrite here would drop
+# — silently, and only discovered when a deploy could no longer decrypt.
 secrets-init:
 	@set -e; \
+	if [ -f .sops.yaml ]; then \
+		echo ".sops.yaml already exists — nothing to do."; \
+		echo "To rotate your key: edit .sops.yaml by hand, then 'sops updatekeys' every *.enc* file."; \
+		exit 0; \
+	fi; \
 	if [ ! -f "$(AGE_KEY)" ]; then \
 		mkdir -p "$$(dirname $(AGE_KEY))"; \
 		age-keygen -o "$(AGE_KEY)"; \
@@ -63,6 +73,62 @@ secrets-init:
 		"    age: $$pub" > .sops.yaml; \
 	echo "==> wrote .sops.yaml for $$pub"
 
+# Adds a second age key that only CI holds, so the deploy workflow can decrypt a
+# project's own secrets and write /srv/<project>/.env itself. Without this a new
+# project with secrets needs a manual out-of-band push, which is the one thing
+# docs/new-project.md promises you never have to do.
+#
+# Scoped on purpose. CI can decrypt projects/** and nothing else: terraform's
+# Hetzner and DigitalOcean tokens, and the restic password guarding every backup,
+# stay laptop-only. That matters because CI already has HUB_SSH_KEY and `deploy`
+# is root-equivalent via the docker group — so CI can already read any .env on
+# the box. Letting it decrypt project secrets grants nothing new; letting it
+# decrypt terraform/ would hand over the accounts the box is built from.
+#
+# The private key is printed once and never written to disk. Paste it into the
+# repo secret SOPS_AGE_KEY, then discard the scrollback.
+secrets-ci-init:
+	@set -e; \
+	test -f .sops.yaml || { echo "no .sops.yaml — run 'make secrets-init' first"; exit 1; }; \
+	if grep -q '^  - path_regex: \^projects/' .sops.yaml; then \
+		echo "CI rule already present in .sops.yaml — nothing to do"; exit 0; \
+	fi; \
+	mine=$$(sed -n 's/^    age: //p' .sops.yaml | head -1); \
+	test -n "$$mine" || { echo "could not read your recipient from .sops.yaml"; exit 1; }; \
+	tmpd=$$(mktemp -d); trap 'shred -u "$$tmpd/key.txt" 2>/dev/null || true; rm -rf "$$tmpd"' EXIT; \
+	tmp="$$tmpd/key.txt"; \
+	age-keygen -o "$$tmp"; \
+	cipub=$$(sed -n 's/^# public key: //p' "$$tmp"); \
+	test -n "$$cipub" || { echo "age-keygen produced no public key line"; exit 1; }; \
+	printf '%s\n' \
+		'# Recipients for every encrypted file in this repo. Committed on purpose:' \
+		'# it is public-key material, and having it here is what makes `sops <file>`' \
+		'# work with no flags.' \
+		'#' \
+		'# First match wins, so the narrow project rule must stay above the catch-all.' \
+		'creation_rules:' \
+		'  # Project secrets: yours and CI'"'"'s, so .github/workflows/deploy.yml can' \
+		'  # decrypt them onto the box without a manual step.' \
+		'  - path_regex: ^projects/.*\.enc(\.env)?$$' \
+		'    age: >-' \
+		"      $$mine," \
+		"      $$cipub" \
+		'  # Everything else — terraform, platform stacks — is laptop-only. CI has no' \
+		'  # business with the Hetzner/DigitalOcean tokens or the restic password.' \
+		'  - path_regex: \.enc(\.env)?$$' \
+		"    age: $$mine" > .sops.yaml; \
+	echo "==> rewrote .sops.yaml; CI recipient is $$cipub"; \
+	for f in projects/*/secrets.enc.env projects/*/*.enc; do \
+		[ -f "$$f" ] || continue; \
+		sops updatekeys -y "$$f" && echo "==> re-encrypted $$f to both recipients"; \
+	done; \
+	echo ""; \
+	echo "Add this as the repo secret SOPS_AGE_KEY (Settings -> Secrets -> Actions),"; \
+	echo "then clear your scrollback. It is not saved anywhere:"; \
+	echo ""; \
+	grep -v '^#' "$$tmp"; \
+	echo ""
+
 # Opens $EDITOR on the decrypted content and re-encrypts on save; creates the file
 # if it does not exist yet. No SSH, no key fetching — .sops.yaml says who the
 # recipient is and sops finds your key at $(AGE_KEY).
@@ -70,6 +136,7 @@ secrets:
 	@test -n "$(FILE)" || { echo "usage: make secrets FILE=stacks/backup/secrets.enc.env"; exit 1; }
 	@test -f .sops.yaml || { echo "no .sops.yaml — run 'make secrets-init' first"; exit 1; }
 	sops $(FILE)
+
 
 # ---------------------------------------------------------------- infrastructure
 
@@ -111,9 +178,16 @@ sync:
 	@set -e; \
 	stage=$$(mktemp -d); trap 'rm -rf "$$stage"' EXIT; \
 	rsync -a --exclude '*.enc' --exclude '*.enc.env' --exclude '*.example' stacks/ "$$stage/"; \
-	sops -d stacks/traefik/admin-users.enc > "$$stage/traefik/admin-users"; \
-	sops -d stacks/backup/secrets.enc.env  > "$$stage/backup/.env"; \
-	chmod 0600 "$$stage/traefik/admin-users" "$$stage/backup/.env"; \
+	for src in stacks/*/secrets.enc.env stacks/*/*.enc; do \
+		[ -f "$$src" ] || continue; \
+		stack=$$(basename "$$(dirname "$$src")"); base=$$(basename "$$src"); \
+		case "$$base" in \
+			secrets.enc.env) out=".env" ;; \
+			*)               out="$${base%.enc}" ;; \
+		esac; \
+		sops -d "$$src" > "$$stage/$$stack/$$out"; \
+		chmod 0600 "$$stage/$$stack/$$out"; \
+	done; \
 	rsync -az --delete "$$stage/" deploy@$(HUB_IP):/srv/platform/
 
 up: sync
