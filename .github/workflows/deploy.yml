@@ -24,6 +24,16 @@ on:
         description: "Hostname the app serves (e.g. rss.waqasali.dev), used for the post-deploy healthcheck"
         required: true
         type: string
+      health-path:
+        description: "Path to probe after deploying. Use a real health endpoint — many apps 404 on / even when perfectly healthy."
+        required: false
+        type: string
+        default: /
+      expect-status:
+        description: "Shell glob the HTTP status must match. Default is any 2xx/3xx; set e.g. 401 for an endpoint that is meant to reject unauthenticated probes."
+        required: false
+        type: string
+        default: "[23][0-9][0-9]"
       build:
         description: "Build and push an image from this repo. Set false for a compose file that only references pre-built images (e.g. an upstream project like FreshRSS)."
         required: false
@@ -103,16 +113,24 @@ jobs:
           ssh $ssh_opts "deploy@${{ secrets.SSH_HOST }}" \
             "cd /srv/${{ inputs.project }} && docker compose pull && docker compose up -d --remove-orphans"
 
+      # Checks that *this app* is serving, not merely that something answered.
+      # Traefik terminates TLS for the whole wildcard domain and returns its own
+      # 404 when it has no route — which is exactly what a crash-looping
+      # container looks like — so "not 000" was passing for a dead deploy.
       - name: Verify
+        env:
+          URL: https://${{ inputs.host }}${{ inputs.health-path }}
+          EXPECT: ${{ inputs.expect-status }}
         run: |
           set -eu
+          code=000
           for i in $(seq 1 20); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' "https://${{ inputs.host }}" || true)
-            if [ "$code" != "000" ]; then
-              echo "==> https://${{ inputs.host }} responded $code"
-              exit 0
-            fi
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$URL" || true)
+            case "$code" in
+              $EXPECT) echo "==> $URL responded $code"; exit 0 ;;
+            esac
+            echo "    $URL -> $code, retrying"
             sleep 3
           done
-          echo "no response from https://${{ inputs.host }} after 60s" >&2
+          echo "$URL never returned $EXPECT after 60s (last: $code)" >&2
           exit 1

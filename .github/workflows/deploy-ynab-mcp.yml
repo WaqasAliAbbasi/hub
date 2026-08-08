@@ -17,6 +17,9 @@ jobs:
       compose-path: projects/ynab-mcp/compose.yml
       secrets-path: projects/ynab-mcp/secrets.enc.env
       host: ynab.waqasali.dev
+      # / is a 404 on this server even when healthy; /health is its own endpoint.
+      health-path: /health
+      expect-status: "200"
       build: false
     secrets:
       SSH_HOST: ${{ secrets.HUB_SSH_HOST }}

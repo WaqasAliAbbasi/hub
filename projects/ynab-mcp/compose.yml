@@ -26,8 +26,12 @@ services:
       - MCP_TRANSPORT=http
       - PORT=3000
       - PUBLIC_URL=https://ynab.waqasali.dev
-      # Offer read-write at the YNAB consent screen. The scope is chosen when
-      # you authorize, so this is a ceiling, not a grant.
+      # Both are needed. YNAB_READ_ONLY is the server-wide switch and defaults
+      # to true — on its own, YNAB_OAUTH_ALLOW_WRITE leaves the server logging
+      # "READ-ONLY mode (write operations disabled)". ALLOW_WRITE only widens
+      # what is offered at the YNAB consent screen; the scope you approve there
+      # is still the real ceiling.
+      - YNAB_READ_ONLY=false
       - YNAB_OAUTH_ALLOW_WRITE=true
       # Default driver is `memory`, which silently loses every token on
       # restart. sqlite under ./data survives deploys and gets backed up.
