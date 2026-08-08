@@ -137,7 +137,7 @@ the details.
 
 FreshRSS is the guinea pig; it's already written.
 
-1. Move `freshrss.tf` → `projects/freshrss/compose.yml` on `rss.waqasali.dev`.
+1. Move `freshrss.tf` → `projects/freshrss/compose.yml` on `read.waqasali.dev`.
 2. Write the reusable deploy workflow: build → push GHCR → SSH → `compose pull && up -d`
    → verify the container is healthy. Publish it as a reusable workflow so app repos get
    it in ~10 lines.

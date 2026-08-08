@@ -16,7 +16,7 @@ jobs:
     with:
       project: freshrss
       compose-path: projects/freshrss/compose.yml
-      host: rss.waqasali.dev
+      host: read.waqasali.dev
       build: false
     secrets:
       SSH_HOST: ${{ secrets.HUB_SSH_HOST }}
