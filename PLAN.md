@@ -7,7 +7,10 @@ infrastructure code. Plus enough monitoring to know when something breaks withou
 Status as of 2026-08-08: `hub` is **live** on Hetzner (fsn1), wildcard DNS resolves,
 Traefik is issuing real Let's Encrypt certs, and Dozzle is up behind basic-auth. `waqasali.dev`
 apex stays on GitHub Pages. StudentBase is still on its own DO droplet at `188.166.206.48`,
-untouched.
+untouched. Phase 3 is proven: the reusable GitHub Actions deploy workflow shipped FreshRSS
+to `/srv/freshrss` over CI, Traefik issued a real cert for `read.waqasali.dev` with no
+manual step, and its data lands at `/srv/freshrss/data` where the nightly backup picks it
+up automatically.
 
 **Decisions made:** Docker Compose + Traefik (not K3s). Hetzner, region flexible.
 No HA. StudentBase migrates here once the platform is proven. Uptime Kuma and Beszel were
@@ -133,19 +136,31 @@ Dozzle is live behind basic-auth, nightly `restic` backups are running (7 daily 
 for changing the box without rebuilding it — see README's Backups and Layout sections for
 the details.
 
-## Phase 3 — Prove the loop
+## Phase 3 — Prove the loop — done
 
-FreshRSS is the guinea pig; it's already written.
+FreshRSS was the guinea pig.
 
-1. Move `freshrss.tf` → `projects/freshrss/compose.yml` on `read.waqasali.dev`.
-2. Write the reusable deploy workflow: build → push GHCR → SSH → `compose pull && up -d`
-   → verify the container is healthy. Publish it as a reusable workflow so app repos get
-   it in ~10 lines.
-3. `docs/new-project.md`: the checklist — `/srv` dir, compose file with the three labels,
-   copy the workflow.
+1. Done — `freshrss.tf` became `projects/freshrss/compose.yml`, live on `read.waqasali.dev`.
+   Data is bind-mounted at `./data` (→ `/srv/freshrss/data`) rather than a named volume,
+   so the nightly backup picks it up with no per-project config.
+2. Done — `.github/workflows/deploy.yml`: build → push GHCR → SSH → ship compose file →
+   `compose pull && up -d` → poll the host until it responds. Callable by any repo in
+   ~10 lines (`build: false` skips the build/push steps for pre-built images, as FreshRSS's
+   own caller workflow, `deploy-freshrss.yml`, does). A dedicated CI deploy key — distinct
+   from the personal one `make sync` uses — was added to the `deploy` user via
+   `ops/provision.sh`.
+3. Done — `docs/new-project.md`: the checklist for a new app repo — compose file with the
+   three labels plus the data-bind-mount convention, the ~10-line caller workflow, first
+   deploy.
 
-**Done when:** a second trivial project goes from empty repo to live HTTPS URL by
-following that doc, touching nothing in `hub`.
+Verified live: pushing `projects/freshrss/compose.yml` to `main` triggered the workflow,
+which shipped the compose file, brought the container up, and Traefik issued a real
+Let's Encrypt cert for `read.waqasali.dev` with no manual step.
+
+**Not yet exercised:** FreshRSS lives inside `hub` (it has no upstream repo of its own),
+so the original "done when" — a project going from an *empty separate repo* to live HTTPS
+by following `docs/new-project.md` alone — is still open. The mechanics are proven either
+way; the first real app repo (or Phase 4's StudentBase) is what closes that gap.
 
 ## Phase 4 — Migrate StudentBase
 
