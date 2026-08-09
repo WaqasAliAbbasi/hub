@@ -205,7 +205,8 @@ can't let one runaway container OOM a neighbour.
 | Dozzle | ~0.05 GB |
 | FreshRSS | ~0.3 GB |
 | ynab-mcp | ~0.15 GB |
-| **Subtotal** | **~2.3 GB** |
+| n8n | ~0.4 GB (idle; spikes to ~1-2 GB during workflow runs, capped by `mem_limit: 1g`) |
+| **Subtotal** | **~2.7 GB** |
 
 Running on a Hetzner **CX33** (4 vCPU / 8 GB, fsn1, ~€8/mo) for headroom — builds,
 Postgres restores, and traffic spikes all want it. A **CX22** (2 vCPU / 4 GB, ~€4.35/mo)
