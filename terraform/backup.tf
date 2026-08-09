@@ -1,12 +1,10 @@
-# Backups get their own bucket and their own scoped credential — deliberately not
-# reusing the Spaces key that authenticates the Terraform state backend. A leaked
-# backup credential should not also be a path to tampering with state.
+# Own bucket, own scoped credential — separate from the state backend's Spaces key,
+# so a leaked backup credential can't also tamper with state.
 resource "digitalocean_spaces_bucket" "backups" {
   name   = "personal-hub-backups"
   region = "sgp1"
 
-  # Terraform must not be the thing that can delete backups. Emptying the bucket
-  # (if it's ever actually decommissioned) is a deliberate, separate action.
+  # Terraform must never be able to delete backups.
   force_destroy = false
 }
 
@@ -25,7 +23,7 @@ output "backup_bucket" {
 }
 
 output "backup_access_key_id" {
-  description = "Scoped Spaces key for the backup job — write this into stacks/backup/.env by hand, it is not synced automatically"
+  description = "Scoped Spaces key for the backup job — write into stacks/backup/.env by hand, not synced automatically"
   value       = digitalocean_spaces_key.backup.access_key
   sensitive   = true
 }

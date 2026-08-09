@@ -1,9 +1,7 @@
 name: deploy freshrss
 
-# FreshRSS is the Phase 3 guinea pig (see PLAN.md) — it lives in this repo rather
-# than its own because it's an off-the-shelf image, not something we build. This
-# is what a real app repo's caller workflow looks like (see docs/new-project.md),
-# minus the build step.
+# Lives in this repo rather than its own since it's an off-the-shelf image, not
+# something we build. See docs/new-project.md for a real app repo's caller workflow.
 on:
   push:
     branches: [main]

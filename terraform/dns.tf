@@ -2,11 +2,8 @@ data "digitalocean_domain" "main" {
   name = "waqasali.dev"
 }
 
-# One wildcard record covers every project forever: adding a service means adding a
-# Traefik host label, with no DNS change and no Terraform run.
-#
-# The apex is deliberately untouched — waqasali.dev stays on GitHub Pages, and a
-# wildcard does not shadow an explicit apex record.
+# Covers every project forever: a new service just adds a Traefik host label, no
+# DNS change. Apex stays untouched (GitHub Pages) — a wildcard doesn't shadow it.
 resource "digitalocean_record" "wildcard" {
   domain = data.digitalocean_domain.main.id
   type   = "A"
@@ -23,11 +20,8 @@ resource "digitalocean_record" "wildcard_v6" {
   ttl    = 300
 }
 
-# Everything below was already sitting on the domain at DO, created by hand over the
-# years — GitHub Pages (apex + www), iCloud Mail, and a couple of one-off site
-# verification TXT records. Imported 2026-08-09 so the whole domain is under
-# Terraform, not just the wildcard. Import commands, run once after adding each
-# resource below:
+# Below: pre-existing records (GitHub Pages, iCloud Mail, site verification TXTs),
+# imported 2026-08-09 so the whole domain is under Terraform. Import commands used:
 #
 #   terraform import 'digitalocean_record.apex_github["185.199.109.153"]' waqasali.dev,1809246569
 #   terraform import 'digitalocean_record.apex_github["185.199.108.153"]' waqasali.dev,1809246597
@@ -44,9 +38,6 @@ resource "digitalocean_record" "wildcard_v6" {
 #   terraform import digitalocean_record.spf waqasali.dev,1809246781
 #   terraform import digitalocean_record.apple_domain_verification waqasali.dev,1809246813
 #   terraform import digitalocean_record.google_site_verification waqasali.dev,1809246823
-#
-# `terraform plan` should come back clean once every import above succeeds —
-# anything else means an import targeted the wrong record.
 
 resource "digitalocean_record" "apex_github" {
   for_each = toset(["185.199.108.153", "185.199.109.153", "185.199.110.153", "185.199.111.153"])

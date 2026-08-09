@@ -1,14 +1,11 @@
 #!/bin/sh
 # Nightly backup: every /srv/<project>/data/ to Spaces via restic, plus a logical
-# pg_dump of any running Postgres first — copying a live data directory risks a
-# torn, inconsistent restore; a dump does not.
+# pg_dump of any running Postgres first (a live data directory risks a torn restore).
 set -eu
 
 cd /srv/platform/backup
 
-# Restic credentials. Written here at 0600 by `make sync`, which decrypts
-# stacks/backup/secrets.enc.env on your laptop — this box holds no key and needs
-# no sops.
+# Written at 0600 by `make sync`, which decrypts secrets.enc.env on your laptop.
 set -a
 . ./.env
 set +a

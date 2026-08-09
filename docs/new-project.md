@@ -33,17 +33,13 @@ networks:
 ```
 
 `image` must use the literal `${IMAGE_TAG}` placeholder — the deploy workflow substitutes
-it with the git SHA it just built, so every deploy is pinned to a specific image and a
-rollback is just re-running an old workflow run. Set `mem_limit` — an unbounded container
-on a no-HA box can OOM everything else running on it.
+it with the git SHA it just built, so a rollback is just re-running an old workflow run.
+Set `mem_limit` so a runaway container can't OOM everything else on the box.
 
-If the app has state worth keeping, bind-mount it at `./data` (relative to the compose
-file, so it resolves to `/srv/<project>/data` on the box) rather than a named volume —
-the nightly backup (`stacks/backup/run.sh`) only walks `/srv/*/data`, and a named volume
-is invisible to it and silently unbacked-up.
-
-`*.waqasali.dev` is a wildcard DNS record already pointed at the box, so a new subdomain
-needs no DNS change — Traefik requests the cert itself the first time it sees the label.
+If the app has state worth keeping, bind-mount it at `./data` rather than a named
+volume — the nightly backup only walks `/srv/*/data`, and a named volume is invisible to
+it. `*.waqasali.dev` is a wildcard DNS record already pointed at the box, so a new
+subdomain needs no DNS change — Traefik requests the cert itself.
 
 ## 2. Deploy workflow
 
@@ -70,8 +66,7 @@ jobs:
 ```
 
 `HUB_SSH_HOST` is the box's IP (`make ip` in `hub`). `HUB_SSH_KEY` is the CI deploy
-private key — ask whoever holds it; it is never committed anywhere. Both are repo secrets
-on the app repo, not on `hub`.
+private key — never committed anywhere. Both are repo secrets on the app repo, not `hub`.
 
 ## 3. Secrets (only if the app needs them)
 
@@ -83,26 +78,20 @@ make secrets FILE=projects/<project>/secrets.enc.env   # opens $EDITOR, encrypts
 
 Point the workflow at it with `secrets-path:` and pass `SOPS_AGE_KEY`, as
 `deploy-ynab-mcp.yml` does. On every deploy the workflow decrypts it to
-`/srv/<project>/.env` at 0600 — before `docker compose up` — so `env_file: .env`
-in the compose file just works. Nothing is placed on the box by hand.
+`/srv/<project>/.env` at 0600, before `docker compose up`, so `env_file: .env` just works.
 
-This needs `make secrets-ci-init`, once ever, which mints a second age key that
-only CI holds and scopes it to `projects/**`. The Terraform and platform-stack
-secrets stay laptop-only: CI already has a root-equivalent deploy key and can
-read any `.env` on the box, but it has no way to reach the Hetzner/DigitalOcean
-tokens or the restic password.
+This needs `make secrets-ci-init`, once ever, which mints a second age key scoped to
+`projects/**` that only CI holds. Terraform and platform-stack secrets stay laptop-only.
 
-If the app writes to `./data` and its image runs as a non-root user, add
-`user: "1000:1000"` to the service. The workflow creates `/srv/<project>/data`
-as `deploy` (uid 1000), and an image with its own baked-in user — most of them,
-on some other uid — falls through to the directory's "other" permissions and
-cannot write. The symptom is a permission or "unable to open" error on startup,
-looping via `restart: always`. `chown` is not the fix: `deploy` has no sudo.
+If the app writes to `./data` as a non-root user, add `user: "1000:1000"` to the service —
+the workflow creates `/srv/<project>/data` as `deploy` (uid 1000), and an image with its
+own baked-in user typically can't write to it otherwise. Symptom: a permission error on
+startup, looping via `restart: always`. `chown` isn't the fix; `deploy` has no sudo.
 
 ## 4. First deploy
 
 Push to `main`. The workflow builds the image, pushes it to GHCR, copies `compose.yml` to
-`/srv/<project>/` on the box, and runs `docker compose up -d` there. The final step polls
+`/srv/<project>/` on the box, and runs `docker compose up -d` there, then polls
 `https://<project>.waqasali.dev` until it responds.
 
 ## Done when

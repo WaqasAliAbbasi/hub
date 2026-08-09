@@ -1,13 +1,9 @@
 name: deploy
 
-# Reusable workflow for shipping a project onto the hub box. An app repo calls
-# this in ~10 lines instead of reimplementing build/push/ship/verify itself —
-# see docs/new-project.md for the calling side.
-#
-# The app repo's compose.yml must reference its image as
-# `ghcr.io/<repo>:${IMAGE_TAG}` — this workflow substitutes IMAGE_TAG with the
-# git SHA before shipping it, so every deploy is pinned to a specific build
-# and a rollback is just re-running an old workflow run.
+# Reusable workflow for shipping a project onto the hub box — see docs/new-project.md
+# for the calling side. compose.yml must reference its image as
+# `ghcr.io/<repo>:${IMAGE_TAG}`; this substitutes IMAGE_TAG with the git SHA, so a
+# rollback is just re-running an old workflow run.
 on:
   workflow_call:
     inputs:
@@ -67,11 +63,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # GHCR rejects any tag with an uppercase letter in it, and
-      # `github.repository` preserves the repo's own casing — so a repo like
-      # StudentBase/StudentBase fails the push with "repository name must be
-      # lowercase". Every caller so far used `build: false`, which is why this
-      # never surfaced.
+      # GHCR rejects uppercase tags; github.repository preserves repo casing.
       - name: Compute image name
         if: inputs.build
         id: image
@@ -83,12 +75,9 @@ jobs:
         if: inputs.build
         uses: docker/setup-buildx-action@v3
 
-      # GHA cache backend: layers live in Actions' own cache, scoped to this
-      # repo, evicted on GitHub's normal 7-day/10 GB cache LRU — no registry
-      # storage, nothing to prune by hand. `mode=max` caches every intermediate
-      # stage (server-deps, client-build, ...), not just the final one, which is
-      # what makes an unchanged `npm ci` layer or `next build` actually skip on
-      # the next deploy instead of only speeding up the final COPY stages.
+      # GHA cache: no registry storage, nothing to prune by hand. mode=max caches
+      # every intermediate stage, not just the final one, so an unchanged `npm ci`
+      # or `next build` layer actually skips on the next deploy.
       - name: Build and push image
         if: inputs.build
         uses: docker/build-push-action@v6
@@ -112,12 +101,9 @@ jobs:
           install -m 600 /dev/stdin ~/.ssh/id_deploy <<< "${{ secrets.SSH_KEY }}"
           ssh_opts="-o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy"
 
-          # A GHCR package pushed with GITHUB_TOKEN defaults to private, and the
-          # box otherwise has no credential to pull what was just built — this
-          # was the first `build: true` caller to hit it. GITHUB_TOKEN is
-          # already scoped to this run and expires when the job ends, so
-          # logging in fresh before every pull (rather than a durable PAT) costs
-          # nothing extra to rotate and leaves nothing standing between deploys.
+          # GHCR packages pushed with GITHUB_TOKEN default to private, and the box
+          # has no other credential to pull them — log in fresh each time with the
+          # run-scoped token rather than a durable PAT.
           if [ "${{ inputs.build }}" = "true" ]; then
             echo "==> logging the box in to ghcr.io to pull the image just pushed"
             echo "$GH_TOKEN" | ssh $ssh_opts "deploy@${{ secrets.SSH_HOST }}" \
@@ -126,16 +112,13 @@ jobs:
 
           envsubst '$IMAGE_TAG' < "${{ inputs.compose-path }}" > /tmp/compose.yml
 
-          # `data` alongside: Docker would otherwise create a missing bind-mount
-          # source as root, which a container running as a non-root user cannot
-          # write to. Created by `deploy`, which owns the rest of /srv/<project>.
+          # Pre-create `data` as `deploy` — otherwise Docker creates a missing
+          # bind-mount source as root, unwritable by a non-root container.
           ssh $ssh_opts "deploy@${{ secrets.SSH_HOST }}" \
             "mkdir -p /srv/${{ inputs.project }}/data"
           scp $ssh_opts /tmp/compose.yml "deploy@${{ secrets.SSH_HOST }}:/srv/${{ inputs.project }}/compose.yml"
 
-          # Only projects that have both an encrypted file and the key to open it.
-          # The plaintext is piped straight to a 0600 file on the box and never
-          # written to the runner's disk.
+          # Plaintext pipes straight to a 0600 file on the box; never touches the runner's disk.
           if [ -f "$SECRETS_PATH" ] && [ -n "${SOPS_AGE_KEY:-}" ]; then
             echo "==> decrypting $SECRETS_PATH to /srv/${{ inputs.project }}/.env"
             curl -fsSL -o /tmp/sops \
@@ -151,10 +134,8 @@ jobs:
           ssh $ssh_opts "deploy@${{ secrets.SSH_HOST }}" \
             "cd /srv/${{ inputs.project }} && docker compose pull && docker compose up -d --remove-orphans"
 
-      # Checks that *this app* is serving, not merely that something answered.
-      # Traefik terminates TLS for the whole wildcard domain and returns its own
-      # 404 when it has no route — which is exactly what a crash-looping
-      # container looks like — so "not 000" was passing for a dead deploy.
+      # Checks that *this app* is serving — Traefik's own 404 for an unrouted host
+      # looks the same as "not 000", so a crash-looping container could pass otherwise.
       - name: Verify
         env:
           URL: https://${{ inputs.host }}${{ inputs.health-path }}

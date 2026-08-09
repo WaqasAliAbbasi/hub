@@ -1,7 +1,5 @@
-# oalevelnotes.com's static site (formerly a DigitalOcean App Platform app) is
-# retired — both apex and www now just 301 to studentbase.app instead of
-# serving anything. No backend container, so the router points at Traefik's
-# built-in noop service rather than a real one.
+# oalevelnotes.com's static site is retired — apex and www just 301 to
+# studentbase.app. No backend container, so the router uses Traefik's noop service.
 
 http:
   routers:

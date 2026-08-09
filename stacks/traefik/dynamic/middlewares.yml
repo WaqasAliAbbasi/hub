@@ -1,7 +1,6 @@
-# Everything in this directory is parsed by Traefik's file provider, so only put
-# real dynamic config here — a stray credentials or notes file would be read as
-# config and logged as an error. The basic-auth users file therefore lives one
-# level up, at stacks/traefik/admin-users.
+# Only real dynamic config belongs in this directory — Traefik's file provider
+# parses everything here, so a stray file gets logged as a config error. The
+# basic-auth users file lives one level up, at stacks/traefik/admin-users.
 
 http:
   middlewares:
@@ -10,16 +9,13 @@ http:
       headers:
         stsSeconds: 31536000
         stsIncludeSubdomains: true
-        # preload is deliberately off: it implies submitting waqasali.dev to the
-        # browser preload list, which is effectively irreversible.
-        stsPreload: false
+        stsPreload: false # off on purpose: submitting to the browser preload list is irreversible
         contentTypeNosniff: true
         frameDeny: true
         referrerPolicy: strict-origin-when-cross-origin
 
-    # Admin surfaces (Dozzle, Uptime Kuma, Beszel) opt into this on their own
-    # router — it is not global like security-headers, so public services never
-    # pay for a basic-auth prompt by accident.
+    # Admin surfaces opt in per-router — not global, so public services never
+    # get a basic-auth prompt by accident.
     admin-auth:
       basicAuth:
         usersFile: /etc/traefik/admin-users

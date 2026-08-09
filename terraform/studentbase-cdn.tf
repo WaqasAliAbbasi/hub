@@ -1,39 +1,13 @@
 # Everything StudentBase's own Terraform used to manage that isn't tied to a specific
-# droplet: the CDN serving content.studentbase.app, its certificate, the Spaces
-# bucket behind it, and the mail/SPF/DKIM/icloud DNS records. See
-# docs/studentbase-cutover.md. `digitalocean_domain.studentbase`, `prod_api`,
-# and `prod_frontend` are in dns-studentbase.tf — split out because those are the
-# routing-relevant records; this file is everything else.
+# droplet: the CDN, its cert, the Spaces bucket behind it, and mail/SPF/DKIM/icloud
+# records. `digitalocean_domain.studentbase`, `prod_api`, `prod_frontend` are in
+# dns-studentbase.tf (the routing-relevant records); this file is everything else.
 #
-# The old prod DB backup bucket (sb-prod-backup) that used to live here was deleted
-# 2026-08-09 — StudentBase's Postgres now backs up through Hub's restic job
-# (personal-hub-backups), so a separate Spaces bucket of ad-hoc SQL dumps was
-# redundant.
+# Certificate is DO's own managed Let's Encrypt cert, not the acme provider — DO
+# renews it automatically, same as Traefik does for every other cert on this box.
 #
-# The certificate is DigitalOcean's own managed Let's Encrypt cert (type =
-# "lets_encrypt"), not uploaded via the acme provider — DO renews it automatically,
-# the same way Traefik renews every other cert on this box, with no Terraform
-# involvement ever again. Only available because DNS for studentbase.app is on DO
-# already (a prerequisite for this mode); confirmed working since dns-studentbase.tf
-# already manages records here.
-#
-# This replaced an earlier version of this file that issued the cert via the
-# vancluever/acme provider (tls_private_key + acme_registration + acme_certificate,
-# DNS-01 challenge) — deliberately not imported from StudentBase's old Terraform,
-# since ACME has no "read my key back" operation, so a fresh cert was the only option
-# either way. That version worked but left the exact renewal problem it was replacing:
-# nothing reissues the cert without a human or automation running `terraform apply`
-# periodically. DO's managed mode has no such gap.
-#
-# All 14 real resources in this file and dns-studentbase.tf were imported and applied
-# 2026-08-09 — the import commands that were here are done, not reference material.
-# Switching to this DO-managed cert destroys the now-unused acme chain, which
-# revokes the briefly-live acme-issued cert (`revoke_certificate_on_destroy` defaults
-# true) — harmless, it was replaced within the same session it was created.
-#
-# One cleanup step remains from the original cutover: the *original* uploaded cert
-# from StudentBase's old Terraform (`LetsEncryptTerraform8a0ff1bb`) is still sitting
-# at DO, unmanaged by anything, no longer referenced by the CDN. Delete it by hand:
+# Cleanup still pending: the original uploaded cert from StudentBase's old Terraform
+# (`LetsEncryptTerraform8a0ff1bb`) is orphaned at DO, no longer referenced. Delete:
 #
 #   curl -X DELETE -H "Authorization: Bearer $DO_TOKEN" \
 #     https://api.digitalocean.com/v2/certificates/7d8c0447-f374-4db6-81c9-4f49cf5f5baf
@@ -71,8 +45,8 @@ resource "digitalocean_record" "studentbase_content" {
   ttl    = 1800
 }
 
-# CNAME to the apex, same as before — not the same record as prod_frontend/prod_api
-# in dns-studentbase.tf, which are the A records the apex/api actually resolve to.
+# Not the same record as prod_frontend/prod_api in dns-studentbase.tf, the A records
+# the apex/api actually resolve to.
 resource "digitalocean_record" "studentbase_www" {
   domain = digitalocean_domain.studentbase.id
   type   = "CNAME"
@@ -113,9 +87,7 @@ resource "digitalocean_record" "studentbase_dmarc" {
   ttl    = 1800
 }
 
-# Postmark's DKIM selector name is date-stamped by Postmark itself at setup time —
-# it is not a mistake that this looks like a timestamp, and it does not need updating
-# on any schedule.
+# Selector name is Postmark's own date-stamp from setup — not a bug, doesn't need updating.
 resource "digitalocean_record" "studentbase_postmark_dkim" {
   domain = digitalocean_domain.studentbase.id
   type   = "TXT"

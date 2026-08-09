@@ -1,12 +1,7 @@
 terraform {
-  # State lives in DigitalOcean Spaces. The s3 backend reads AWS_ACCESS_KEY_ID /
-  # AWS_SECRET_ACCESS_KEY natively, so no -backend-config flags are needed — the
-  # Makefile supplies them (along with every TF_VAR_*) from
-  # terraform/secrets.enc.env. Run terraform via `make`, not directly.
-  #
-  # This uses a different key from the abandoned K3s attempt
-  # (terraform-server.tfstate, same bucket) — checked 2026-08-09, that state has
-  # zero resources, nothing was ever left running from it.
+  # State in DigitalOcean Spaces. The s3 backend reads AWS_ACCESS_KEY_ID/SECRET_ACCESS_KEY
+  # natively, supplied by the Makefile from terraform/secrets.enc.env — run via `make`, not
+  # directly. Different key from the abandoned K3s attempt (terraform-server.tfstate).
   backend "s3" {
     endpoints = {
       s3 = "https://sgp1.digitaloceanspaces.com"
@@ -35,19 +30,15 @@ terraform {
   }
 }
 
-# Compute lives on Hetzner.
 provider "hcloud" {
   token = var.hcloud_token
 }
 
-# DigitalOcean is retained only for DNS (waqasali.dev is delegated there) and for
-# the Spaces buckets holding state and backups. No compute.
+# DNS + Spaces (state, backups) only. No compute.
 provider "digitalocean" {
   token = var.digitalocean_token
 
-  # Spaces (S3-compatible) operations go through a separate credential from the
-  # DO API token above — this is what lets the provider create the backup bucket
-  # and the scoped key that reads/writes it.
+  # Separate credential from the DO API token — needed for Spaces (S3-compatible) ops.
   spaces_access_id  = var.spaces_access_id
   spaces_secret_key = var.spaces_secret_key
 }

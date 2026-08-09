@@ -1,48 +1,32 @@
 name: ynab-mcp
 
-# One container. The server is itself an OAuth 2.1 Authorization Server
-# (Dynamic Client Registration + PKCE, via the MCP SDK), so there is no auth
-# proxy in front of it — Traefik only terminates TLS and routes.
-#
-# Auth is YNAB's own OAuth: you authorize at YNAB's consent screen and the
-# server stores an encrypted per-user refresh token. There is deliberately no
-# YNAB Personal Access Token here — nothing on this box holds a long-lived,
-# all-budgets, full-write credential.
+# One container. It's its own OAuth 2.1 Authorization Server (Dynamic Client
+# Registration + PKCE via the MCP SDK), so Traefik only terminates TLS and routes.
+# Auth is YNAB's own OAuth — no long-lived Personal Access Token on this box.
 services:
   ynab-mcp:
     image: ghcr.io/auzroz/ynab-mcp:0.3.3
     restart: always
-    # The image runs as its own `mcp` user (uid 1001), but ./data is created by
-    # the deploy workflow as `deploy` (uid 1000) — so the container lands on the
-    # directory's "other" permissions, cannot write, and sqlite fails with
-    # "unable to open database file". Run as the owner instead; chown is not an
-    # option because `deploy` deliberately has no sudo.
+    # Image's own `mcp` user (uid 1001) can't write to ./data, owned by `deploy`
+    # (uid 1000, no sudo) — run as the owner instead.
     user: "1000:1000"
-    # YNAB_OAUTH_CLIENT_ID, YNAB_OAUTH_CLIENT_SECRET, ENCRYPTION_KEY
-    # (ENCRYPTION_KEY = `openssl rand -base64 32`; changing it orphans every
-    # stored token and forces everyone to re-authorize.)
+    # YNAB_OAUTH_CLIENT_ID, YNAB_OAUTH_CLIENT_SECRET, ENCRYPTION_KEY (openssl rand
+    # -base64 32; rotating it orphans every stored token).
     env_file: .env
     environment:
       - MCP_TRANSPORT=http
       - PORT=3000
       - PUBLIC_URL=https://ynab.waqasali.dev
-      # Both are needed. YNAB_READ_ONLY is the server-wide switch and defaults
-      # to true — on its own, YNAB_OAUTH_ALLOW_WRITE leaves the server logging
-      # "READ-ONLY mode (write operations disabled)". ALLOW_WRITE only widens
-      # what is offered at the YNAB consent screen; the scope you approve there
-      # is still the real ceiling.
+      # Both needed: YNAB_READ_ONLY is the server-wide switch (defaults true);
+      # ALLOW_WRITE only widens what's offered at YNAB's consent screen.
       - YNAB_READ_ONLY=false
       - YNAB_OAUTH_ALLOW_WRITE=true
-      # Default driver is `memory`, which silently loses every token on
-      # restart. sqlite under ./data survives deploys and gets backed up.
-      - STORAGE_DRIVER=sqlite
+      - STORAGE_DRIVER=sqlite # `memory` (default) loses tokens on restart
       - SQLITE_PATH=/data/ynab-mcp.db
       - ENABLE_DNS_REBINDING_PROTECTION=true
       - ALLOWED_HOSTS=ynab.waqasali.dev
       - ALLOWED_ORIGINS=https://ynab.waqasali.dev
-      # One hop: Traefik. Without this, per-client rate limiting buckets every
-      # request under Traefik's container IP instead of the real caller.
-      - TRUST_PROXY=1
+      - TRUST_PROXY=1 # one hop (Traefik), else rate limiting buckets by its IP
     volumes:
       - ./data:/data
     labels:
@@ -50,8 +34,7 @@ services:
       - traefik.http.routers.ynab-mcp.rule=Host(`ynab.waqasali.dev`)
       - traefik.http.routers.ynab-mcp.tls.certresolver=le
       - traefik.http.services.ynab-mcp.loadbalancer.server.port=3000
-      # Deliberately NOT admin-auth@file: a basic-auth prompt in front of this
-      # returns 401s that Claude's OAuth handshake cannot answer.
+      # Not admin-auth@file: a basic-auth 401 breaks Claude's OAuth handshake.
     networks:
       - edge
     mem_limit: 256m

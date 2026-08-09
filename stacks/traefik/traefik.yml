@@ -19,21 +19,17 @@ entryPoints:
     address: ":443"
     http:
       middlewares:
-        # Applied to every router. Individual services can override by declaring
-        # their own middleware chain on their router.
+        # Applied to every router; services can override with their own chain.
         - security-headers@file
 
-  # Internal only — no port mapping in compose.yml, so this is reachable from the
-  # container's own healthcheck and nothing else.
+  # No port mapping in compose.yml — reachable only from the container's own healthcheck.
   internal:
     address: ":8080"
 
 providers:
   docker:
     endpoint: "unix:///var/run/docker.sock"
-    # Nothing is routed unless it explicitly sets traefik.enable=true. Without
-    # this, every container that happens to expose a port gets published.
-    exposedByDefault: false
+    exposedByDefault: false # nothing routes unless it sets traefik.enable=true
     network: edge
     watch: true
 
@@ -57,8 +53,7 @@ log:
 
 accessLog:
   filters:
-    # Successful requests are noise here; Dozzle is for reading these and disk is
-    # finite. 4xx/5xx and slow requests are what you actually want to see.
+    # Successful requests are noise; only errors and slow requests are worth keeping.
     statusCodes:
       - "400-599"
     minDuration: "2s"

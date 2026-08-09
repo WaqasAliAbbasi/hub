@@ -1,17 +1,12 @@
-# Keeps DigitalOcean resources that belong to this repo filed under the "Hub"
-# project instead of drifting into whatever project happened to be marked
-# default at creation time (StudentBase, historically — it predates Hub and is
-# still the account's is_default project). digitalocean_project_resources sets
-# the *complete* membership list for the project, so every URN that belongs in
-# Hub has to be listed here, not just the one being moved — anything left out
-# gets silently unassigned back to the default project on the next apply.
+# Files this repo's DO resources under the "Hub" project instead of the account
+# default. digitalocean_project_resources sets the *complete* membership list —
+# anything left out gets silently unassigned back to default on the next apply.
 data "digitalocean_project" "hub" {
   name = "Hub"
 }
 
-# The Terraform state bucket predates every other resource here by definition
-# (nothing can be terraform-managed before the backend that stores its own
-# state exists), so it's referenced as a data source rather than a resource.
+# Predates everything else here (it's the backend that stores this state), so a
+# data source rather than a resource.
 data "digitalocean_spaces_bucket" "tf_state" {
   name   = "personal-hub-terraform-state"
   region = "sgp1"

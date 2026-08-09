@@ -8,16 +8,14 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      # Read-only, but note this is still root-equivalent access to the host for
-      # anything that compromises Traefik. The hardening step is a socket proxy
-      # exposing only the container-list endpoints; not worth it yet, but it is
-      # the first thing to add if this box ever hosts anything sensitive.
+      # Read-only, but still root-equivalent host access if Traefik is compromised.
+      # Hardening step if this box ever hosts something sensitive: a socket proxy
+      # exposing only the container-list endpoints.
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik.yml:/etc/traefik/traefik.yml:ro
       - ./dynamic:/etc/traefik/dynamic:ro
       - ./admin-users:/etc/traefik/admin-users:ro
-      # Named volume, not a bind mount: Traefik creates acme.json at 0600 and
-      # refuses to start if the permissions are wider.
+      # Named volume: Traefik writes acme.json at 0600 and refuses wider permissions.
       - acme:/acme
     networks:
       - edge

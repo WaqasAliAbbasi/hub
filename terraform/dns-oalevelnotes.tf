@@ -1,18 +1,10 @@
-# oalevelnotes.com — registered at GoDaddy, DNS was on Cloudflare, moving to
-# DigitalOcean so it can be managed here like waqasali.dev and studentbase.app.
-# The static site used to live on a DigitalOcean App Platform app
-# (oalevelnotes-g8huc) fronted by Cloudflare; that app is being retired, so
-# both apex and www now point straight at hub and get redirected to
-# studentbase.app by Traefik (stacks/traefik/dynamic/oalevelnotes-redirect.yml)
-# instead of serving any content of their own.
+# oalevelnotes.com — registered at GoDaddy, moved from Cloudflare DNS to DigitalOcean.
+# The old DO App Platform site is retired; apex and www now point at hub and get
+# redirected to studentbase.app by Traefik (dynamic/oalevelnotes-redirect.yml).
+# No MX/TXT/SPF/DMARC/CAA existed at Cloudflare, so nothing else to import.
 #
-# Current records at Cloudflare, queried 2026-08-09 before cutover, for
-# reference: no MX/TXT/SPF/DMARC/CAA records exist on this domain — no email
-# or other services configured, so nothing else needs to be imported.
-#
-# A resource, not a data source — this repo becomes the sole owner of the
-# zone once GoDaddy's nameservers are repointed. `terraform destroy` (or
-# deleting this block) deletes the zone and everything under it.
+# A resource, not a data source — this repo owns the zone once GoDaddy's
+# nameservers are repointed; `terraform destroy` deletes it and everything under it.
 resource "digitalocean_domain" "oalevelnotes" {
   name = "oalevelnotes.com"
 }
