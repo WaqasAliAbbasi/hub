@@ -2,16 +2,14 @@ name: platform
 
 services:
   traefik:
-    image: traefik:v3.7
+    # Digest-pinned: `docker compose pull` trusts whatever the registry serves for a
+    # tag, so upgrades are a deliberate edit here, not a side effect of a deploy.
+    image: traefik:v3.7@sha256:9c3b91d5fb7770853ca5c1124a23c34bf2d9b47ffaebeab2614cbaf410dcb2ac
     restart: always
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      # Read-only, but still root-equivalent host access if Traefik is compromised.
-      # Hardening step if this box ever hosts something sensitive: a socket proxy
-      # exposing only the container-list endpoints.
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik.yml:/etc/traefik/traefik.yml:ro
       - ./dynamic:/etc/traefik/dynamic:ro
       - ./admin-users:/etc/traefik/admin-users:ro
@@ -19,6 +17,9 @@ services:
       - acme:/acme
     networks:
       - edge
+      - socket-proxy
+    depends_on:
+      - socket-proxy
     healthcheck:
       test: ["CMD", "traefik", "healthcheck", "--ping"]
       interval: 20s
@@ -29,9 +30,32 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  # The only container holding the real Docker socket. Traefik and Dozzle talk to
+  # this instead, so compromising either yields a read-only, GET-only slice of the
+  # API (no exec, no create, no volumes) rather than root on the host. Lives on
+  # `socket-proxy`, an --internal network created by ops/provision.sh — never on
+  # `edge`, so nothing routable can reach it.
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
+    restart: always
+    environment:
+      - CONTAINERS=1 # list/inspect/logs/stats — what Traefik and Dozzle need
+      - INFO=1       # Dozzle's host stats
+      # EVENTS, PING and VERSION default to allowed; every POST and everything
+      # else (exec, images, volumes, networks) stays denied.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - socket-proxy
+    mem_limit: 64m
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
   acme:
 
 networks:
   edge:
+    external: true
+  socket-proxy:
     external: true

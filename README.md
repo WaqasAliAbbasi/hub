@@ -214,9 +214,14 @@ Hetzner pricing at order time.
 
 ## Known tradeoffs
 
-- **Traefik mounts the Docker socket read-only.** Still root-equivalent access to the
-  host for anything that compromises Traefik. Fix: a socket proxy exposing only the
-  container-list endpoints, worth adding if this box ever hosts something sensitive.
+- **Only the socket proxy holds the Docker socket.** Traefik and Dozzle talk to a
+  GET-only filtered API (`socket-proxy` in `stacks/traefik/compose.yml`, on an
+  `--internal` network created by `make provision`), so compromising either yields
+  container metadata and logs, not root on the host.
+- **Backups are versioned, not immutable.** The box's readwrite Spaces key could
+  `restic forget` everything; bucket versioning keeps deleted objects recoverable
+  for 30 days. The same key can still purge versions via the raw S3 API — Spaces
+  has no object lock, so true immutability would need a second repo elsewhere.
 - **Single box, no HA.** Reboots are downtime. Deliberate.
 - **`user_data` changes replace the server.** Why `cloud-init.yml` is frozen after day one
   and `ops/`/`make provision` exists for everything after.

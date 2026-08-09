@@ -99,15 +99,24 @@ jobs:
           set -eu
           install -m 700 -d ~/.ssh
           install -m 600 /dev/stdin ~/.ssh/id_deploy <<< "${{ secrets.SSH_KEY }}"
-          ssh_opts="-o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy"
+          # Pinned host key (public material) — accept-new never verifies anything
+          # on a fresh runner, and secrets get piped over this connection. Regenerate
+          # with `ssh-keyscan -t ed25519 $(make ip)` if the box is ever rebuilt.
+          echo "* ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDkA0BC46gKSRuDv+QLr7GLoBUhKlDJJtEyEoztQJc+W" > ~/.ssh/known_hosts
+          ssh_opts="-o StrictHostKeyChecking=yes -i ~/.ssh/id_deploy"
 
           # GHCR packages pushed with GITHUB_TOKEN default to private, and the box
           # has no other credential to pull them — log in fresh each time with the
-          # run-scoped token rather than a durable PAT.
+          # run-scoped token rather than a durable PAT. That token expires with the
+          # run, so a build:false project (relying on anonymous pulls of a public
+          # image) must log back out — otherwise Docker keeps sending the stale
+          # credential and GHCR returns "denied" instead of falling back to anonymous.
           if [ "${{ inputs.build }}" = "true" ]; then
             echo "==> logging the box in to ghcr.io to pull the image just pushed"
             echo "$GH_TOKEN" | ssh $ssh_opts "deploy@${{ secrets.SSH_HOST }}" \
               "docker login ghcr.io -u '$GH_ACTOR' --password-stdin"
+          else
+            ssh $ssh_opts "deploy@${{ secrets.SSH_HOST }}" "docker logout ghcr.io" || true
           fi
 
           envsubst '$IMAGE_TAG' < "${{ inputs.compose-path }}" > /tmp/compose.yml
@@ -123,6 +132,9 @@ jobs:
             echo "==> decrypting $SECRETS_PATH to /srv/${{ inputs.project }}/.env"
             curl -fsSL -o /tmp/sops \
               https://github.com/getsops/sops/releases/download/v3.13.3/sops-v3.13.3.linux.amd64
+            # This binary is handed the age key and every project secret — verify it
+            # against the checksum from the upstream release before executing.
+            echo "e5bec3346a873ae91d871550f3e698c1aad962aff462a080e40f25fde17fef6b  /tmp/sops" | sha256sum -c -
             chmod +x /tmp/sops
             /tmp/sops -d "$SECRETS_PATH" | ssh $ssh_opts "deploy@${{ secrets.SSH_HOST }}" \
               "umask 077 && cat > /srv/${{ inputs.project }}/.env"

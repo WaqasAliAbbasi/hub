@@ -5,7 +5,9 @@ name: ynab-mcp
 # Auth is YNAB's own OAuth — no long-lived Personal Access Token on this box.
 services:
   ynab-mcp:
-    image: ghcr.io/auzroz/ynab-mcp:0.3.3
+    # Digest-pinned — tags are mutable, and this image holds OAuth write access
+    # to a real budget. Upgrading is a deliberate edit of this line.
+    image: ghcr.io/auzroz/ynab-mcp:0.3.3@sha256:62df761651a2c33c9945bb68a590c25deeae35830de5f205955b6524c34ff673
     restart: always
     # Image's own `mcp` user (uid 1001) can't write to ./data, owned by `deploy`
     # (uid 1000, no sudo) — run as the owner instead.

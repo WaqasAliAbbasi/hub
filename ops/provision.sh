@@ -62,6 +62,11 @@ bantime = 1h
 EOF
 systemctl restart fail2ban
 
+# Internal-only network for the Docker API proxy (stacks/traefik/compose.yml).
+# --internal: no route out, and nothing on `edge` can reach it — only containers
+# explicitly attached (Traefik, Dozzle) see the filtered API.
+docker network inspect socket-proxy >/dev/null 2>&1 || docker network create --internal socket-proxy
+
 systemctl daemon-reload
 systemctl enable --now backup.timer docker-prune.timer
 

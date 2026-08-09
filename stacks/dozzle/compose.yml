@@ -2,10 +2,13 @@ name: dozzle
 
 services:
   dozzle:
-    image: amir20/dozzle:v8
+    # Digest-pinned, same policy as every image not built by us.
+    image: amir20/dozzle:v8@sha256:0df89c904da71e94a0c9ed3c89a890f01488321b5f10ac1e0c0bedcead9af6e4
     restart: always
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      # Filtered API via the platform stack's socket proxy — an internet-facing
+      # service behind one basic-auth prompt shouldn't hold the raw socket.
+      - DOCKER_HOST=tcp://socket-proxy:2375
     labels:
       - traefik.enable=true
       - traefik.http.routers.dozzle.rule=Host(`logs.waqasali.dev`)
@@ -14,10 +17,13 @@ services:
       - traefik.http.services.dozzle.loadbalancer.server.port=8080
     networks:
       - edge
+      - socket-proxy
     mem_limit: 64m
     security_opt:
       - no-new-privileges:true
 
 networks:
   edge:
+    external: true
+  socket-proxy:
     external: true

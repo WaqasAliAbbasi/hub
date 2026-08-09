@@ -28,7 +28,8 @@ entryPoints:
 
 providers:
   docker:
-    endpoint: "unix:///var/run/docker.sock"
+    # Via the socket proxy — this container never sees the real Docker socket.
+    endpoint: "tcp://socket-proxy:2375"
     exposedByDefault: false # nothing routes unless it sets traefik.enable=true
     network: edge
     watch: true
