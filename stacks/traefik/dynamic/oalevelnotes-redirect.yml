@@ -1,0 +1,23 @@
+# oalevelnotes.com's static site (formerly a DigitalOcean App Platform app) is
+# retired — both apex and www now just 301 to studentbase.app instead of
+# serving anything. No backend container, so the router points at Traefik's
+# built-in noop service rather than a real one.
+
+http:
+  routers:
+    oalevelnotes-redirect:
+      rule: "Host(`oalevelnotes.com`) || Host(`www.oalevelnotes.com`)"
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: le
+      middlewares:
+        - oalevelnotes-redirect@file
+      service: noop@internal
+
+  middlewares:
+    oalevelnotes-redirect:
+      redirectRegex:
+        regex: "^https://(?:www\\.)?oalevelnotes\\.com/(.*)"
+        replacement: "https://studentbase.app/${1}"
+        permanent: true
