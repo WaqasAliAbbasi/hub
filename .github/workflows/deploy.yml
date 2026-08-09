@@ -79,6 +79,16 @@ jobs:
           REPO: ${{ github.repository }}
         run: echo "name=ghcr.io/${REPO,,}" >> "$GITHUB_OUTPUT"
 
+      - name: Set up Buildx
+        if: inputs.build
+        uses: docker/setup-buildx-action@v3
+
+      # GHA cache backend: layers live in Actions' own cache, scoped to this
+      # repo, evicted on GitHub's normal 7-day/10 GB cache LRU — no registry
+      # storage, nothing to prune by hand. `mode=max` caches every intermediate
+      # stage (server-deps, client-build, ...), not just the final one, which is
+      # what makes an unchanged `npm ci` layer or `next build` actually skip on
+      # the next deploy instead of only speeding up the final COPY stages.
       - name: Build and push image
         if: inputs.build
         uses: docker/build-push-action@v6
@@ -86,6 +96,8 @@ jobs:
           context: .
           push: true
           tags: ${{ steps.image.outputs.name }}:sha-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Ship compose file and deploy
         env:
