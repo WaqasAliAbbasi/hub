@@ -4,9 +4,9 @@ terraform {
   # Makefile supplies them (along with every TF_VAR_*) from
   # terraform/secrets.enc.env. Run terraform via `make`, not directly.
   #
-  # NOTE: this uses a different key from the abandoned K3s attempt
-  # (terraform-server.tfstate). That state may still reference a droplet and DNS
-  # records; check the DigitalOcean console for leftovers and remove them by hand.
+  # This uses a different key from the abandoned K3s attempt
+  # (terraform-server.tfstate, same bucket) — checked 2026-08-09, that state has
+  # zero resources, nothing was ever left running from it.
   backend "s3" {
     endpoints = {
       s3 = "https://sgp1.digitaloceanspaces.com"

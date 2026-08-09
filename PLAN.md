@@ -184,33 +184,52 @@ EOL-database upgrade to a DNS cutover means a bad upgrade and a bad cutover beco
 same incident. Sequential is strictly safer, and everything deferred gets done later
 against a box that already has working backups and a powered-off escape hatch.
 
-1. **`prevent_destroy` on the server** — done, `terraform/server.tf`. Errors on *any*
-   replacement rather than rebuilding the box under real data. From here on, cloud-init
-   changes are applied by hand and backfilled into the file.
-2. **`/srv/studentbase/compose.yml`**: the app container unchanged (same image, same
-   `start.sh`, same `HEALTHCHECK`), plus `postgres:10.3` and `redis:alpine`. Postgres data
-   bind-mounted at `./data/postgres` so the nightly backup picks it up with no per-project
-   config, per the Phase 3 convention.
-3. **Secrets**: the sops+age pattern the platform stacks and `projects/ynab-mcp` already
-   use (see README's Secrets section). Rotate everything from the old
-   `terraform.tfvars` during this step — treat all of it as compromised-by-exposure.
-4. **Routing**: labels for `studentbase.app`, `www.studentbase.app`, and
-   `api.studentbase.app`. The `files/api.studentbase.app` nginx file and all the ACME
-   plumbing in `deployment/terraform/` are then dead.
-5. **Copy the data**: stop the old stack, copy `PGDATA` across, start `postgres:10.3`
-   against it. Redis is a cache and starts empty — the only consequence is that anything
-   session-like in there logs users out at cutover, which is fine during a planned one.
-6. **Cutover**: drop DNS TTL a day ahead, run alongside the old box, verify against the new
-   IP directly via `/etc/hosts`, flip the A records, keep the old droplet powered off — not
-   destroyed — for a week.
-7. **Decommission**: delete `modules/web`, `modules/server`, and every SSH provisioner from
-   StudentBase's repo. Its deploy workflow becomes the Phase 3 pattern. Keep Spaces, the
-   CDN, and the DNS records.
+Status as of 2026-08-09: **live** on hub. `studentbase.app` and `api.studentbase.app`
+resolve to the hub box and serve real traffic against the migrated database (row counts
+verified equal — 6390 — between the pre-cutover `pg_dumpall` and the live database before
+the DNS flip). Full runbook, including the bugs found getting here, is
+`docs/studentbase-cutover.md`.
 
-No schema change happens at cutover, so no migration runs during this phase — see Phase 5.
+1. **`prevent_destroy` on the server** — done, `terraform/server.tf`.
+2. **`/srv/studentbase/compose.yml`** — done. One deviation from "unchanged": the
+   Dockerfile's `HEALTHCHECK` used `localhost`, which resolves to `::1` first under bridge
+   networking (unlike the droplet's `--network=host`) and Next.js only binds IPv4 — so the
+   container sat permanently unhealthy and Traefik silently refused to route to it. Fixed
+   to `127.0.0.1`. Postgres also needed no `user:` override, despite the copied PGDATA
+   landing owned by `deploy` (uid 1000) rather than its usual uid 999 — the image's own
+   entrypoint chowns it on boot, same as it always has.
+3. **Secrets** — done: sops+age, CI recipient rotated (the original was unrecoverable —
+   `make secrets-ci-init` prints it once and used to shred it; that target now writes it to
+   a file instead). Credentials were copied from the droplet's `/env` as-is, not yet
+   rotated — still open, see Phase 5.
+4. **Routing** — done, including the GHCR-private-by-default and Traefik-silently-excludes-
+   unhealthy-containers issues above.
+5. **Copy the data** — done. `pg_dumpall` backup taken first; PGDATA stopped-and-copied,
+   2113 files both sides; Redis started empty as planned.
+6. **Cutover** — DNS flipped without the full 30-minute TTL wait; a few resolvers (including
+   Let's Encrypt's) briefly still hit the stopped old droplet before converging. Traefik
+   retried ACME automatically once DNS caught up — no manual fix needed. Old droplet is
+   stopped (containers only) but still powered on, kept as the rollback target.
+7. **Decommission** — done early and taken further than planned (ahead of the week-long
+   hold, once the cutover itself was verified rather than waiting on the droplet as a
+   time-based ritual). `deployment/terraform/` is gone from StudentBase's repo entirely —
+   not just the droplet/web modules. Everything it managed now lives in hub's own
+   Terraform: `prod_api`/`prod_frontend` in `terraform/dns-studentbase.tf` (done, imported,
+   verified live); the CDN, both Spaces buckets, and every mail/SPF/DKIM/icloud DNS record
+   in `terraform/studentbase-cdn.tf` (written, not yet applied — needs hub's DigitalOcean
+   token, not available on the machine that did this reorg; the certificate chain is
+   freshly recreated rather than imported, since ACME can't hand back a private key). Full
+   detail and the exact import commands are in `docs/studentbase-cutover.md`. `deploy.yaml`
+   and `backup_db.yml` (already broken — it read a now-deleted `terraform output`) are
+   deleted; `deploy-hub.yml` is renamed to `deploy.yml`, push-triggered. Still open: run the
+   `studentbase-cdn.tf` imports and apply, delete the old DO certificate object once the CDN
+   is confirmed on the new one, power off the old droplet after the hold.
+
+No schema change happened at cutover, so no migration ran — see Phase 5 for how the next
+one will.
 
 **Done when:** studentbase.app serves from the new box, the old droplet is off, and a
-deploy is a `git push` rather than a 17-variable `terraform apply`.
+deploy is a `git push` rather than a 17-variable `terraform apply`. Two of three remain.
 
 ## Phase 5 — Deferred from the cutover, then cleanup
 
