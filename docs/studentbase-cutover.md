@@ -68,15 +68,43 @@ churning for hours.
 
 At this point the app should serve real pages against an empty database.
 
-## 2. Drop the DNS TTL (no downtime)
+## 2. Detach DNS from Terraform, then drop the TTL (no downtime)
+
+**`studentbase.app`'s DNS is Terraform-managed, not just sitting in a registrar.**
+`digitalocean_record.prod_api` and `.prod_frontend`
+(`deployment/terraform/environments/prod/domain_prod.tf`) both read
+`value = module.server.ipv4_address` — the *old* droplet. Edit either record by hand while
+Terraform still owns them, and the next `terraform apply` on this stack — for any unrelated
+reason, before decommission — sees drift and silently flips DNS straight back to the dead
+droplet. This is the same failure mode `prevent_destroy` was added to hub's server for,
+just on the DNS side.
+
+Detach them from state first, so they become unmanaged and nothing can revert them:
+
+```sh
+cd deployment/terraform/environments/prod
+terraform state rm digitalocean_record.prod_api digitalocean_record.prod_frontend
+```
+
+This needs the same DO token and Spaces-backed state access as any other `terraform`
+command here — neither is on this laptop; source them the way `terraform apply` normally
+does. `www` needs no action: it is a CNAME to `@` and was never pointed at an IP.
+
+`doctl` is not installed locally — install it, or use the DO web console. Either way, only
+after the `state rm` above:
 
 ```sh
 doctl compute domain records list studentbase.app
-# set ttl to 60 on the two A records: @ and api
+# set ttl to 60 on the two A records: @ (prod_frontend) and api (prod_api)
 ```
 
 Wait **30 minutes** — one old TTL — for resolvers to pick the shorter value up. The plan
 originally said "a day ahead"; at a 1800 s starting TTL that is unnecessary.
+
+At step 7 (decommission), delete `domain_prod.tf`'s two resources from code entirely —
+they are already out of state, so this just stops them showing up as an addition on some
+future `terraform plan`. The plan's "keep the DNS records" still holds: this only removes
+Terraform's management of them, not the records themselves.
 
 ## 3. Copy the data (downtime begins)
 

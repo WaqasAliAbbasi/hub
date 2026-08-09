@@ -92,11 +92,25 @@ jobs:
           IMAGE_TAG: sha-${{ github.sha }}
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
           SECRETS_PATH: ${{ inputs.secrets-path }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ACTOR: ${{ github.actor }}
         run: |
           set -eu
           install -m 700 -d ~/.ssh
           install -m 600 /dev/stdin ~/.ssh/id_deploy <<< "${{ secrets.SSH_KEY }}"
           ssh_opts="-o StrictHostKeyChecking=accept-new -i ~/.ssh/id_deploy"
+
+          # A GHCR package pushed with GITHUB_TOKEN defaults to private, and the
+          # box otherwise has no credential to pull what was just built — this
+          # was the first `build: true` caller to hit it. GITHUB_TOKEN is
+          # already scoped to this run and expires when the job ends, so
+          # logging in fresh before every pull (rather than a durable PAT) costs
+          # nothing extra to rotate and leaves nothing standing between deploys.
+          if [ "${{ inputs.build }}" = "true" ]; then
+            echo "==> logging the box in to ghcr.io to pull the image just pushed"
+            echo "$GH_TOKEN" | ssh $ssh_opts "deploy@${{ secrets.SSH_HOST }}" \
+              "docker login ghcr.io -u '$GH_ACTOR' --password-stdin"
+          fi
 
           envsubst '$IMAGE_TAG' < "${{ inputs.compose-path }}" > /tmp/compose.yml
 
