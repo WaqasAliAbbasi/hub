@@ -4,13 +4,18 @@ Goal: one cheap box hosting several side projects, where adding a project means 
 compose file and a DNS-free subdomain label — not editing another project's
 infrastructure code. Plus enough monitoring to know when something breaks without SSHing in.
 
-Status as of 2026-08-08: `hub` is **live** on Hetzner (fsn1), wildcard DNS resolves,
+Status as of 2026-08-09: `hub` is **live** on Hetzner (fsn1), wildcard DNS resolves,
 Traefik is issuing real Let's Encrypt certs, and Dozzle is up behind basic-auth. `waqasali.dev`
 apex stays on GitHub Pages. StudentBase is still on its own DO droplet at `188.166.206.48`,
 untouched. Phase 3 is proven: the reusable GitHub Actions deploy workflow shipped FreshRSS
 to `/srv/freshrss` over CI, Traefik issued a real cert for `read.waqasali.dev` with no
 manual step, and its data lands at `/srv/freshrss/data` where the nightly backup picks it
-up automatically.
+up automatically. A second project — `projects/ynab-mcp/` — has since gone out the same
+way, adding per-project sops secrets to the deploy workflow, and
+`docs/disaster-recovery.md` documents rebuilding the box from backups.
+
+The server now carries `prevent_destroy` (see Phase 4), so Terraform errors rather than
+rebuilds.
 
 **Decisions made:** Docker Compose + Traefik (not K3s). Hetzner, region flexible.
 No HA. StudentBase migrates here once the platform is proven. Uptime Kuma and Beszel were
@@ -49,6 +54,7 @@ Hetzner CX33 (4 vCPU / 8 GB, fsn1)
 │
 ├── /srv/studentbase/ compose.yml + .env + data/   (Phase 4)
 ├── /srv/freshrss/    compose.yml + data/
+├── /srv/ynab-mcp/    compose.yml + .env + data/
 └── /srv/<next>/      ...
 ```
 
@@ -102,11 +108,12 @@ if managing six `/srv` directories starts to chafe.
 |---|---|
 | Docker daemon + Traefik | ~0.2 GB |
 | StudentBase web + api | ~1.0 GB |
-| Postgres 17 | ~0.4 GB |
+| Postgres (10.3 at cutover, 17 after Phase 5) | ~0.4 GB |
 | Redis (already capped `maxmemory 150mb`) | ~0.2 GB |
 | Dozzle | ~0.05 GB |
 | FreshRSS | ~0.3 GB |
-| **Subtotal** | **~2.2 GB** |
+| ynab-mcp | ~0.15 GB |
+| **Subtotal** | **~2.3 GB** |
 
 **CX33** (4 vCPU / 8 GB, ~€8/mo — Hetzner's successor to the retired CX32, same memory,
 more cores) is what's deployed — image builds, Postgres restores and traffic spikes all
@@ -166,43 +173,33 @@ way; the first real app repo (or Phase 4's StudentBase) is what closes that gap.
 
 The risky phase. Everything above must be solid, including a tested restore.
 
-**Before anything else, pin the box down.** Up to now a destructive `terraform apply` has
-cost nothing, and editing `cloud-init.yml` deliberately rebuilds the server — that's the
-Phase 1 iteration loop. The moment real data lands here that flips into the worst failure
-mode in this plan. Add to `hcloud_server.hub`:
+**Move it as-is. Improve it afterwards.** An earlier draft of this phase bundled the
+Postgres 10 → 17 upgrade and a Next.js/Apollo service split into the cutover. Neither is
+required to change hosts, and both inflate the one step where a mistake is user-visible.
+The app runs today under a single container with a supervisor `start.sh`; it runs
+identically in a container on the new box. Postgres needs no logical migration at all —
+same version, same architecture, so a stopped-and-copied `PGDATA` is byte-for-byte
+sufficient, with no dump/restore to rehearse and no row counts to verify. Coupling an
+EOL-database upgrade to a DNS cutover means a bad upgrade and a bad cutover become the
+same incident. Sequential is strictly safer, and everything deferred gets done later
+against a box that already has working backups and a powered-off escape hatch.
 
-```hcl
-lifecycle {
-  ignore_changes  = [ssh_keys]
-  prevent_destroy = true
-}
-```
-
-Not `ignore_changes = [user_data]`: that silences the diff without applying it, so
-`cloud-init.yml` drifts into fiction and you discover it during the rebuild you were
-already having a bad day about. `prevent_destroy` errors on *any* replacement — image
-bump, `server_type` change, `user_data` edit — and errors loudly. From here on,
-cloud-init changes are applied by hand on the box and backfilled into the file.
-
-1. **Postgres 10 → 17.** The genuinely delicate step, and the one to rehearse first: dump
-   from the old box, restore into the new Postgres 17 container, verify row counts and a
-   real login flow. Do a full dry run into a scratch directory before the real cutover.
-2. **Split the container into two services** from the same image with different commands.
-   Today one `start.sh` runs Next.js and Apollo under a hand-rolled supervisor loop that
-   kills the container when either dies. As two compose services, a crashing API stops
-   taking the frontend down with it, and each gets its own healthcheck and restart policy.
-   The existing `HEALTHCHECK` splits cleanly into the two endpoints it already probes.
-3. **Migrations** as a one-shot `docker compose run --rm migrate` using the app image,
-   replacing the `remote-exec` that `docker run`s `node:lts` and `npm install -g prisma`
-   on every apply.
-4. **Secrets**: `/srv/studentbase/.env`, 0600, written by CI from repo secrets — or, if
-   StudentBase's stack ends up living here rather than in its own repo, the same
-   sops+age pattern the platform stacks use (see README's Secrets section). Rotate
-   everything from the old `terraform.tfvars` during this step — treat all of it as
-   compromised-by-exposure.
-5. **Routing**: labels for `studentbase.app`, `www.studentbase.app`, and
+1. **`prevent_destroy` on the server** — done, `terraform/server.tf`. Errors on *any*
+   replacement rather than rebuilding the box under real data. From here on, cloud-init
+   changes are applied by hand and backfilled into the file.
+2. **`/srv/studentbase/compose.yml`**: the app container unchanged (same image, same
+   `start.sh`, same `HEALTHCHECK`), plus `postgres:10.3` and `redis:alpine`. Postgres data
+   bind-mounted at `./data/postgres` so the nightly backup picks it up with no per-project
+   config, per the Phase 3 convention.
+3. **Secrets**: the sops+age pattern the platform stacks and `projects/ynab-mcp` already
+   use (see README's Secrets section). Rotate everything from the old
+   `terraform.tfvars` during this step — treat all of it as compromised-by-exposure.
+4. **Routing**: labels for `studentbase.app`, `www.studentbase.app`, and
    `api.studentbase.app`. The `files/api.studentbase.app` nginx file and all the ACME
    plumbing in `deployment/terraform/` are then dead.
+5. **Copy the data**: stop the old stack, copy `PGDATA` across, start `postgres:10.3`
+   against it. Redis is a cache and starts empty — the only consequence is that anything
+   session-like in there logs users out at cutover, which is fine during a planned one.
 6. **Cutover**: drop DNS TTL a day ahead, run alongside the old box, verify against the new
    IP directly via `/etc/hosts`, flip the A records, keep the old droplet powered off — not
    destroyed — for a week.
@@ -210,10 +207,52 @@ cloud-init changes are applied by hand on the box and backfilled into the file.
    StudentBase's repo. Its deploy workflow becomes the Phase 3 pattern. Keep Spaces, the
    CDN, and the DNS records.
 
+No schema change happens at cutover, so no migration runs during this phase — see Phase 5.
+
 **Done when:** studentbase.app serves from the new box, the old droplet is off, and a
 deploy is a `git push` rather than a 17-variable `terraform apply`.
 
-## Phase 5 — Cleanup
+## Phase 5 — Deferred from the cutover, then cleanup
+
+**Migrations — needed before the first deploy after cutover, not for the cutover itself.**
+Today's mechanism is `deployment/terraform/modules/server/migration.tf`: scp `prisma/` to
+the box, then `docker run node:lts` with `npm install -g prisma@^4.16.2 && prisma migrate
+deploy`, triggered by a `filesha1` of the schema. It dies with the Terraform deploy path.
+
+Either replacement needs the same packaging work first, because the runtime image cannot
+run migrations as built: `server-prod-deps` installs `--omit=dev` and `prisma` is a *root*
+devDependency, so only the generated client at `node_modules/.prisma` survives into
+`runner` — the CLI does not, and neither does `server/prisma/migrations/`. The
+`server-deps` stage has both already (it copies `server/prisma/` wholesale and runs the
+CLI for `prisma generate`), which makes it the natural base.
+
+Two options, **decision still open**:
+
+- *One-shot before `up -d`* — a `migrate` target off `server-deps`, pushed as a second tag,
+  run via `docker compose run --rm` between `pull` and `up -d`. Needs a `migrate-service`
+  input on `.github/workflows/deploy.yml`; the existing `set -eu` aborts the deploy on a
+  non-zero exit. A failed migration leaves the old container still serving — no downtime.
+- *In the container's entrypoint, before starting the server* — simpler, no second image or
+  workflow change, but it puts the CLI and schema-modifying privileges in the production
+  image, and a failed migration crash-loops the new container after the old one is already
+  gone. You're down until you roll back rather than aborting cleanly.
+
+Either way, migrations must be backwards-compatible with the running code (expand/contract:
+add nullable, backfill, drop in a later deploy) — old containers serve against the new
+schema briefly. And if the service split below happens, gate migrations to one service:
+both come from the same image and would otherwise both run on boot.
+
+**Also deferred out of Phase 4:**
+
+- **Postgres 10.3 → 17.** Dump from the running 10.3 container, restore into 17, verify row
+  counts and a real login flow. Do it against a scratch directory first. Now a standalone
+  operation on a box with tested backups and the old droplet still available.
+- **Split the container into two services** from the same image with different commands. A
+  crashing API stops taking the frontend down with it, and each gets its own healthcheck
+  and restart policy. The existing `HEALTHCHECK` splits cleanly into the two endpoints it
+  already probes.
+
+**Cleanup:**
 
 - Drop the monthly `schedule:` cron on StudentBase's deploy workflow. Deploys become
   push-triggered, and cert renewal no longer depends on Terraform running at all.

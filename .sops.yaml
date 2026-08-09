@@ -9,7 +9,7 @@ creation_rules:
   - path_regex: ^projects/.*\.enc(\.env)?$
     age: >-
       age1ewmzgvcp5urdm29a6a967yta90e9dya00gt49gry57gg9h8huvcqlswzft,
-      age104gn5zzxv6z558swh2lzkrnr4ct2dnnzyvvus7eehsrxpw3nlsrs8nqgf9
+      age1l8nfu8a7x9xefac06h85f780su090jv9caf2z6cvujlw7v2wqdss2h59z5
   # Everything else — terraform, platform stacks — is laptop-only. CI has no
   # business with the Hetzner/DigitalOcean tokens or the restic password.
   - path_regex: \.enc(\.env)?$

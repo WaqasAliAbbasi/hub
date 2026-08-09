@@ -67,13 +67,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # GHCR rejects any tag with an uppercase letter in it, and
+      # `github.repository` preserves the repo's own casing — so a repo like
+      # StudentBase/StudentBase fails the push with "repository name must be
+      # lowercase". Every caller so far used `build: false`, which is why this
+      # never surfaced.
+      - name: Compute image name
+        if: inputs.build
+        id: image
+        env:
+          REPO: ${{ github.repository }}
+        run: echo "name=ghcr.io/${REPO,,}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push image
         if: inputs.build
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+          tags: ${{ steps.image.outputs.name }}:sha-${{ github.sha }}
 
       - name: Ship compose file and deploy
         env:

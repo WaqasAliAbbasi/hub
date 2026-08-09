@@ -87,7 +87,7 @@ systemctl enable --now backup.timer docker-prune.timer
 # key you use interactively. Appended, not written, since cloud-init's key must
 # stay too. Idempotent: skips if already present.
 DEPLOY_HOME=/home/deploy
-CI_DEPLOY_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIH52gHDCiIvPQ39vtzHOfbyc4ATszmhXSaLTncywVc9f hub-ci-deploy'
+CI_DEPLOY_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPPG6/GuZzFrXSkqIaZif+vM+abFn9/no3GksEUh+yzc hub-ci-deploy'
 grep -qxF "$CI_DEPLOY_KEY" "$DEPLOY_HOME/.ssh/authorized_keys" 2>/dev/null || \
   echo "$CI_DEPLOY_KEY" >> "$DEPLOY_HOME/.ssh/authorized_keys"
 chown deploy:deploy "$DEPLOY_HOME/.ssh/authorized_keys"

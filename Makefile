@@ -1,6 +1,11 @@
 TF       := terraform -chdir=terraform
 AGE_KEY  := $(HOME)/.config/sops/age/keys.txt
 
+# Where `secrets-ci-init` leaves the CI credentials for you to file. Deliberately
+# outside the repo so it cannot be committed, and outside $(AGE_KEY)'s directory
+# so sops never loads the CI key by accident when you run a local decrypt.
+CI_KEYS  := $(HOME)/hub-ci-keys
+
 # Every credential this repo needs — Hetzner, DigitalOcean, Spaces — lives in one
 # encrypted file, so terraform commands are wrapped rather than requiring you to
 # remember to `source` something first.
@@ -85,19 +90,26 @@ secrets-init:
 # the box. Letting it decrypt project secrets grants nothing new; letting it
 # decrypt terraform/ would hand over the accounts the box is built from.
 #
-# The private key is printed once and never written to disk. Paste it into the
-# repo secret SOPS_AGE_KEY, then discard the scrollback.
+# The private key is written to $(CI_KEYS)/ci_age.txt, 0600, and left there for
+# you to file in your password manager. It used to be printed to the terminal and
+# shredded — which read as careful but meant the only copy lived in scrollback,
+# and the key was unrecoverable the moment that window closed. A file you must
+# delete on purpose is the safer default; the target tells you how.
 secrets-ci-init:
 	@set -e; \
 	test -f .sops.yaml || { echo "no .sops.yaml — run 'make secrets-init' first"; exit 1; }; \
 	if grep -q '^  - path_regex: \^projects/' .sops.yaml; then \
-		echo "CI rule already present in .sops.yaml — nothing to do"; exit 0; \
+		echo "CI rule already present in .sops.yaml — nothing to do."; \
+		echo "To rotate the CI key: edit both .sops.yaml files by hand, then"; \
+		echo "'sops updatekeys' every projects/*/secrets.enc.env — see docs/studentbase-cutover.md."; \
+		exit 0; \
 	fi; \
 	mine=$$(sed -n 's/^    age: //p' .sops.yaml | head -1); \
 	test -n "$$mine" || { echo "could not read your recipient from .sops.yaml"; exit 1; }; \
-	tmpd=$$(mktemp -d); trap 'shred -u "$$tmpd/key.txt" 2>/dev/null || true; rm -rf "$$tmpd"' EXIT; \
-	tmp="$$tmpd/key.txt"; \
-	age-keygen -o "$$tmp"; \
+	mkdir -p "$(CI_KEYS)"; chmod 0700 "$(CI_KEYS)"; \
+	tmp="$(CI_KEYS)/ci_age.txt"; \
+	test ! -e "$$tmp" || { echo "$$tmp already exists — file it and remove it before rerunning"; exit 1; }; \
+	(umask 077; age-keygen -o "$$tmp" 2>/dev/null); \
 	cipub=$$(sed -n 's/^# public key: //p' "$$tmp"); \
 	test -n "$$cipub" || { echo "age-keygen produced no public key line"; exit 1; }; \
 	printf '%s\n' \
@@ -123,10 +135,14 @@ secrets-ci-init:
 		sops updatekeys -y "$$f" && echo "==> re-encrypted $$f to both recipients"; \
 	done; \
 	echo ""; \
-	echo "Add this as the repo secret SOPS_AGE_KEY (Settings -> Secrets -> Actions),"; \
-	echo "then clear your scrollback. It is not saved anywhere:"; \
+	echo "CI private key written to $$tmp (0600). It is not in git and not in"; \
+	echo "your scrollback. Set it as the repo secret on every repo that deploys:"; \
 	echo ""; \
-	grep -v '^#' "$$tmp"; \
+	echo "  grep -v '^#' $$tmp | gh secret set SOPS_AGE_KEY --repo <owner>/<repo>"; \
+	echo ""; \
+	echo "Then save it to your password manager and delete the copy:"; \
+	echo ""; \
+	echo "  shred -u $$tmp"; \
 	echo ""
 
 # Opens $EDITOR on the decrypted content and re-encrypts on save; creates the file
