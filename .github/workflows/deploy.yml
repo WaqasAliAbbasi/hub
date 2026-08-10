@@ -40,6 +40,16 @@ on:
         required: false
         type: string
         default: secrets.enc.env
+      pre-deploy-service:
+        description: "Compose service run to completion between `pull` and `up -d` — a schema migration, typically. It runs while the previous release is still serving, and a non-zero exit aborts the deploy before anything is restarted. Put it behind a compose `profiles:` entry so `up -d` never starts it. Empty (the default) skips the step."
+        required: false
+        type: string
+        default: ""
+      pre-deploy-target:
+        description: "Dockerfile stage to build as a second image for pre-deploy-service, pushed as `<image>:sha-<sha>-<target>` and substituted into compose.yml as ${PRE_DEPLOY_IMAGE_TAG}. For tooling that must not ship in the image that serves traffic. Leave empty for a pre-deploy service that reuses the app image (${IMAGE_TAG}) with a `command:` of its own."
+        required: false
+        type: string
+        default: ""
     secrets:
       SSH_HOST:
         required: true
@@ -54,6 +64,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Every other project on the box is `build: false`, so this is the mistake
+      # the next one to need a pre-deploy step will actually make. Nothing would
+      # push the image pre-deploy-target names, and the failure would otherwise
+      # surface minutes later as an opaque "manifest unknown" on the box.
+      - name: Check pre-deploy inputs agree
+        if: inputs.pre-deploy-target != '' && !inputs.build
+        run: |
+          echo "pre-deploy-target is set but build is false — no image would ever be pushed for it." >&2
+          echo "Either set build: true, or drop pre-deploy-target and give the service a command: of its own." >&2
+          exit 1
 
       - name: Log in to GHCR
         if: inputs.build
@@ -88,11 +109,38 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # The tools that apply a schema change — a CLI, the migration files — are
+      # build-time dependencies, and the image that serves traffic has no
+      # business carrying them or the rights they imply. Whatever stage this
+      # names is almost always one the build above already produced, so with
+      # mode=max above this is a cache hit plus a push.
+      #
+      # The tag suffix is the stage name rather than a fixed string, so the
+      # pushed tag says what it is (`:sha-abc123-migrate`) and a project that
+      # later grows a second one-shot does not collide with the first.
+      #
+      # cache-to writes to its own scope: the default one holds the app image's
+      # layers, and a second mode=max export there would replace that manifest
+      # with only the (much smaller) set this build touched, quietly cold-starting
+      # the next app build.
+      - name: Build and push pre-deploy image
+        if: inputs.build && inputs.pre-deploy-target != ''
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: ${{ inputs.pre-deploy-target }}
+          push: true
+          tags: ${{ steps.image.outputs.name }}:sha-${{ github.sha }}-${{ inputs.pre-deploy-target }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max,scope=pre-deploy
+
       - name: Ship compose file and deploy
         env:
           IMAGE_TAG: sha-${{ github.sha }}
           SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
           SECRETS_PATH: ${{ inputs.secrets-path }}
+          PRE_DEPLOY_SERVICE: ${{ inputs.pre-deploy-service }}
+          PRE_DEPLOY_TARGET: ${{ inputs.pre-deploy-target }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_ACTOR: ${{ github.actor }}
         run: |
@@ -119,7 +167,16 @@ jobs:
             ssh $ssh_opts "deploy@${{ secrets.SSH_HOST }}" "docker logout ghcr.io" || true
           fi
 
-          envsubst '$IMAGE_TAG' < "${{ inputs.compose-path }}" > /tmp/compose.yml
+          # Only a project that builds a second image gets a second tag; a
+          # pre-deploy service without pre-deploy-target reuses the app image, so
+          # ${PRE_DEPLOY_IMAGE_TAG} resolves to something real either way.
+          if [ -n "$PRE_DEPLOY_TARGET" ]; then
+            export PRE_DEPLOY_IMAGE_TAG="$IMAGE_TAG-$PRE_DEPLOY_TARGET"
+          else
+            export PRE_DEPLOY_IMAGE_TAG="$IMAGE_TAG"
+          fi
+
+          envsubst '$IMAGE_TAG $PRE_DEPLOY_IMAGE_TAG' < "${{ inputs.compose-path }}" > /tmp/compose.yml
 
           # Pre-create `data` as `deploy` — otherwise Docker creates a missing
           # bind-mount source as root, unwritable by a non-root container.
@@ -143,8 +200,33 @@ jobs:
             exit 1
           fi
 
+          # Between `pull` and `up -d`, so this runs on a box that already has
+          # the new image but is still serving from the old container: `&&`
+          # means a non-zero exit stops the deploy right here with production
+          # untouched. `run` enables the service's profile and starts its
+          # depends_on itself, so a `condition: service_healthy` on the database
+          # is honoured. -T because ssh gives it no TTY.
+          pre_deploy_cmd=""
+          if [ -n "$PRE_DEPLOY_SERVICE" ]; then
+            # The profile requirement is load-bearing, not style: `up -d` would
+            # otherwise start this service a second time, concurrently with the
+            # app it just ran for. `config --services` lists exactly what
+            # `up -d` would touch, so absence from it is the check. Enforced
+            # rather than documented because the symptom — a migration that
+            # silently ran twice — is not one you would trace back to here.
+            if ssh $ssh_opts "deploy@${{ secrets.SSH_HOST }}" \
+                 "cd /srv/${{ inputs.project }} && docker compose config --services" \
+                 | grep -qx -- "$PRE_DEPLOY_SERVICE"; then
+              echo "pre-deploy-service '$PRE_DEPLOY_SERVICE' is not behind a compose profile, so 'up -d' would start it too." >&2
+              echo "Add 'profiles: [<name>]' to that service; 'compose run' enables the profile by itself." >&2
+              exit 1
+            fi
+            echo "==> will run '$PRE_DEPLOY_SERVICE' to completion before starting the new containers"
+            pre_deploy_cmd="docker compose run --rm -T $PRE_DEPLOY_SERVICE &&"
+          fi
+
           ssh $ssh_opts "deploy@${{ secrets.SSH_HOST }}" \
-            "cd /srv/${{ inputs.project }} && docker compose pull && docker compose up -d --remove-orphans"
+            "cd /srv/${{ inputs.project }} && docker compose pull && $pre_deploy_cmd docker compose up -d --remove-orphans"
 
       # Checks that *this app* is serving — Traefik's own 404 for an unrouted host
       # looks the same as "not 000", so a crash-looping container could pass otherwise.

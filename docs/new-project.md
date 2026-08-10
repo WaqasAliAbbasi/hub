@@ -88,7 +88,59 @@ the workflow creates `/srv/<project>/data` as `deploy` (uid 1000), and an image 
 own baked-in user typically can't write to it otherwise. Symptom: a permission error on
 startup, looping via `restart: always`. `chown` isn't the fix; `deploy` has no sudo.
 
-## 4. First deploy
+## 4. Pre-deploy step (schema migrations, mostly)
+
+`pre-deploy-service` names a compose service the workflow runs **to completion** between
+`docker compose pull` and `up -d`. A non-zero exit aborts the deploy with production
+untouched. Schema migrations are the case this exists for; anything that must succeed
+before new code starts fits.
+
+Add the service, behind a profile so `up -d` never starts it:
+
+```yaml
+  migrate:
+    image: ghcr.io/<org>/<repo>:${IMAGE_TAG}
+    command: ["./bin/migrate"]
+    profiles: [migrate]
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+```
+
+```yaml
+      pre-deploy-service: migrate
+```
+
+The profile is required, not stylistic — the workflow fails the deploy if the service is
+missing from `docker compose config --services`, because a non-profiled one would be
+started a second time by `up -d`, concurrently with the app it just ran for.
+
+Because it runs while the **previous** release is still serving, a migration must be
+backwards-compatible with the code already deployed: expand/contract (add nullable,
+backfill, drop in a later deploy), never a rename in one step.
+
+### When the tooling can't ship in the runtime image
+
+Often it shouldn't: a migration CLI is usually a devDependency stripped from the runtime
+image, and the container serving traffic has no business holding rights to rewrite the
+schema. `pre-deploy-target` names a Dockerfile stage that does have them:
+
+```yaml
+      pre-deploy-service: migrate   # compose service to run
+      pre-deploy-target: migrate    # Dockerfile stage to build it from
+```
+
+That stage is built and pushed as `:sha-<sha>-<target>` alongside the app image and
+substituted into compose as `${PRE_DEPLOY_IMAGE_TAG}` — use that in place of
+`${IMAGE_TAG}` on the service above. It needs `build: true`; the workflow fails fast if
+not. Omit `pre-deploy-target` and `${PRE_DEPLOY_IMAGE_TAG}` resolves to the app image, so
+either shape substitutes cleanly.
+
+`StudentBase` does this with `prisma migrate deploy`.
+
+## 5. First deploy
 
 Push to `main`. The workflow builds the image, pushes it to GHCR, copies `compose.yml` to
 `/srv/<project>/` on the box, and runs `docker compose up -d` there, then polls
