@@ -41,6 +41,45 @@ volume — the nightly backup only walks `/srv/*/data`, and a named volume is in
 it. `*.waqasali.dev` is a wildcard DNS record already pointed at the box, so a new
 subdomain needs no DNS change — Traefik requests the cert itself.
 
+### If the project shouldn't see its neighbours
+
+`edge` is flat: every container on it can reach every other, and most of them — Traefik's
+API, Dozzle, a database, an internal MCP server — trust anything already inside the
+perimeter. That's fine for code you wrote. It isn't for a workload that executes untrusted
+input: an LLM agent with a shell, user-submitted code, a third-party image.
+
+Give that project a network of its own, holding nothing but it and Traefik. **This is the
+one case that does change `hub`:**
+
+1. `ops/provision.sh`, next to the `socket-proxy` block, then `make provision`:
+
+   ```sh
+   docker network inspect <project> >/dev/null 2>&1 || docker network create <project>
+   ```
+
+   No `--internal` unless the app needs no outbound at all — a plain bridge still NATs
+   out, it just has no neighbours.
+
+2. `stacks/traefik/compose.yml` — add `<project>` to Traefik's `networks:` list and to the
+   `networks:` block as `external: true`, then `make platform`.
+
+3. In the project's own compose file, swap `edge` for `<project>` **and add the label**:
+
+   ```yaml
+       labels:
+         - traefik.docker.network=<project>
+   ```
+
+   Don't skip it. `traefik.yml` defaults `providers.docker.network` to `edge`, so without
+   the label Traefik falls back to the container's first network — right while there's
+   only one, but it's Go map iteration order, so adding a second later turns routing into
+   a coin flip.
+
+One network per project, not a shared `untrusted` one — two quarantined workloads on the
+same bridge can reach each other, which is the property you were removing. If such a
+project needs a neighbour, route it over that neighbour's public hostname so it passes
+through that service's own auth. `../assistant` is the worked example.
+
 ## 2. Deploy workflow
 
 In your app's own repo, at `.github/workflows/deploy.yml`:

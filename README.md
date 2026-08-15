@@ -194,6 +194,10 @@ Router names (`myproject` above) must be unique across the whole box. Put the st
 job picks it up automatically. Set `mem_limit` on every service — a single box with no HA
 can't let one runaway container OOM a neighbour.
 
+A project that executes untrusted input — an LLM agent with a shell, user-submitted code —
+doesn't go on `edge` at all. It gets a quarantine network of its own, shared with nothing
+but Traefik. See `docs/new-project.md`.
+
 ## Sizing
 
 | Workload | Reserved |
@@ -218,6 +222,10 @@ Hetzner pricing at order time.
   GET-only filtered API (`socket-proxy` in `stacks/traefik/compose.yml`, on an
   `--internal` network created by `make provision`), so compromising either yields
   container metadata and logs, not root on the host.
+- **`edge` is flat, so untrusted workloads get their own network.** Anything on `edge` can
+  reach anything else, and most of it authenticates nothing from inside the perimeter. The
+  assistant — an LLM with a real shell — sits alone with Traefik on `assistant` instead.
+  That bounds lateral movement, not outbound: it still reaches the whole internet.
 - **Backups are versioned, not immutable.** The box's readwrite Spaces key could
   `restic forget` everything; bucket versioning keeps deleted objects recoverable
   for 30 days. The same key can still purge versions via the raw S3 API — Spaces

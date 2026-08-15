@@ -161,6 +161,9 @@ ssh:
 
 # Decrypts to a throwaway staging copy on your laptop; the box never holds a key.
 # `set -e` aborts before rsync on a bad decrypt. --delete only touches /srv/platform.
+# backup.service runs as root (it needs root to read other containers' data dirs),
+# so pg-dumps/ and last-success land root-owned; deploy can't delete those, so they're
+# excluded here rather than transferred and pruned.
 sync:
 	@test -n "$(HUB_IP)" || { echo "no server_ipv4 output — run 'make apply' first"; exit 1; }
 	@set -e; \
@@ -176,7 +179,7 @@ sync:
 		sops -d "$$src" > "$$stage/$$stack/$$out"; \
 		chmod 0600 "$$stage/$$stack/$$out"; \
 	done; \
-	rsync -az --delete "$$stage/" deploy@$(HUB_IP):/srv/platform/
+	rsync -az --delete --exclude 'backup/pg-dumps' --exclude 'backup/last-success' "$$stage/" deploy@$(HUB_IP):/srv/platform/
 
 up: sync
 	@$(SSH) 'set -e; for f in /srv/platform/*/compose.yml; do \

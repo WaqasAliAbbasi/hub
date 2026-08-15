@@ -15,8 +15,12 @@ services:
       - ./admin-users:/etc/traefik/admin-users:ro
       # Named volume: Traefik writes acme.json at 0600 and refuses wider permissions.
       - acme:/acme
+    # Traefik joins every routable network — it is the only thing that needs to
+    # reach all of them. Each quarantined project (see ops/provision.sh) adds one
+    # here, and `make platform` to recreate the container onto it.
     networks:
       - edge
+      - assistant
       - socket-proxy
     depends_on:
       - socket-proxy
@@ -56,6 +60,8 @@ volumes:
 
 networks:
   edge:
+    external: true
+  assistant:
     external: true
   socket-proxy:
     external: true

@@ -67,6 +67,13 @@ systemctl restart fail2ban
 # explicitly attached (Traefik, Dozzle) see the filtered API.
 docker network inspect socket-proxy >/dev/null 2>&1 || docker network create --internal socket-proxy
 
+# Quarantine network for the assistant (../assistant), an LLM driving a shell and a
+# browser. On `edge` it would be one DNS lookup from Traefik's API, Dozzle, ynab-mcp
+# and StudentBase's Postgres, none of which authenticate a caller already inside the
+# perimeter; here it gets Traefik and nothing else. Not --internal, unlike
+# socket-proxy — the agent still needs the open web, it just loses the neighbours.
+docker network inspect assistant >/dev/null 2>&1 || docker network create assistant
+
 systemctl daemon-reload
 systemctl enable --now backup.timer docker-prune.timer
 
