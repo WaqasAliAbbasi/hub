@@ -144,7 +144,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_ACTOR: ${{ github.actor }}
         run: |
-          set -eu
+          # pipefail matters here: `sops -d ... | ssh ... "cat > .../.env"` would
+          # otherwise exit 0 on a decrypt failure (the ssh half still succeeds on
+          # empty stdin), silently shipping an empty .env instead of failing loud.
+          set -euo pipefail
           install -m 700 -d ~/.ssh
           install -m 600 /dev/stdin ~/.ssh/id_deploy <<< "${{ secrets.SSH_KEY }}"
           # Pinned host key (public material) — accept-new never verifies anything
