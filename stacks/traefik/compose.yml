@@ -21,7 +21,6 @@ services:
     networks:
       - edge
       - assistant
-      - open-notebook
       - socket-proxy
     depends_on:
       - socket-proxy
@@ -63,8 +62,6 @@ networks:
   edge:
     external: true
   assistant:
-    external: true
-  open-notebook:
     external: true
   socket-proxy:
     external: true

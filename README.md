@@ -209,13 +209,12 @@ but Traefik. See `docs/new-project.md`.
 | Dozzle | ~0.05 GB |
 | FreshRSS | ~0.3 GB |
 | ynab-mcp | ~0.15 GB |
-| Open Notebook + SurrealDB | ~2.5 GB |
-| **Subtotal** | **~4.8 GB** |
+| **Subtotal** | **~2.3 GB** |
 
 Running on a Hetzner **CX33** (4 vCPU / 8 GB, fsn1, ~€8/mo) for headroom — builds,
-Postgres restores, and traffic spikes all want it. Open Notebook is the largest single
-tenant and the newest, so it is the first thing to move or cap if the box gets tight.
-Verify current Hetzner pricing at order time.
+Postgres restores, and traffic spikes all want it. A **CX22** (2 vCPU / 4 GB, ~€4.35/mo)
+fits today's workload with ~1.5 GB spare if the floor price matters more. Verify current
+Hetzner pricing at order time.
 
 ## Known tradeoffs
 
@@ -225,9 +224,8 @@ Verify current Hetzner pricing at order time.
   container metadata and logs, not root on the host.
 - **`edge` is flat, so untrusted workloads get their own network.** Anything on `edge` can
   reach anything else, and most of it authenticates nothing from inside the perimeter. The
-  assistant — an LLM with a real shell — sits alone with Traefik on `assistant` instead,
-  and Open Notebook with its database on `open-notebook`. That bounds lateral movement,
-  not outbound: both still reach the whole internet.
+  assistant — an LLM with a real shell — sits alone with Traefik on `assistant` instead.
+  That bounds lateral movement, not outbound: it still reaches the whole internet.
 - **Backups are versioned, not immutable.** The box's readwrite Spaces key could
   `restic forget` everything; bucket versioning keeps deleted objects recoverable
   for 30 days. The same key can still purge versions via the raw S3 API — Spaces
