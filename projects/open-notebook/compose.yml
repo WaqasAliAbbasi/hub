@@ -78,7 +78,9 @@ services:
       # Deliberately not set: OPEN_NOTEBOOK_ENABLE_DOCLING (an ML parsing stack,
       # models downloaded at first boot) and OPEN_NOTEBOOK_ENABLE_CRAWL4AI (a
       # bundled Chromium). Both are GB-scale on a box with ~5 GB spare, and the
-      # built-in extractors already handle PDFs and web pages.
+      # built-in extractors already handle PDFs and web pages — with Firecrawl
+      # (FIRECRAWL_API_KEY in .env, not a Settings credential) covering the
+      # JavaScript-heavy ones that would otherwise need local Chromium.
 
       # Upstream's compose also sets SURREAL_EXPERIMENTAL_GRAPHQL on the
       # database; the app never queries GraphQL, so it stays off here.
