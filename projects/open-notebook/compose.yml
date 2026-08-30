@@ -1,0 +1,118 @@
+name: open-notebook
+
+# Two upstream images wired together, nothing built — so the deploy workflow
+# lives in this repo (.github/workflows/deploy-open-notebook.yml), like freshrss
+# and ynab-mcp.
+#
+# On its own `open-notebook` network rather than `edge`: it is a third-party
+# image whose whole job is fetching arbitrary URLs and parsing documents nobody
+# here wrote, and it is driven by an LLM. Here it sees Traefik and its own
+# database; on `edge` it would also see Dozzle, ynab-mcp and StudentBase's
+# Postgres. See docs/new-project.md.
+services:
+  # No host port, unlike upstream's compose, which binds 8000 for local
+  # debugging: nothing outside this network has any business reaching the
+  # database, and the only client is the app container next to it.
+  surrealdb:
+    # Digest-pinned — `docker compose pull` trusts whatever the registry serves
+    # for a tag. Open Notebook v1 targets SurrealDB v2; v3 is a separate upgrade.
+    image: surrealdb/surrealdb:v2.6.5@sha256:d653f6c8a89e81f865ee31cd2f587c50f50ace922175e04150b1e385d2f86011
+    restart: always
+    # Upstream's requirement, not a preference: the server writes RocksDB files
+    # into the bind mount, which the image's own user cannot do.
+    user: root
+    # Exec form so a password containing spaces stays a single argument.
+    # ${SURREAL_PASSWORD} comes from /srv/open-notebook/.env, which the deploy
+    # workflow writes before `docker compose up`.
+    command:
+      - start
+      - --log
+      - warn
+      - --user
+      - root
+      - --pass
+      - ${SURREAL_PASSWORD:?SURREAL_PASSWORD must be set in .env}
+      - rocksdb:/mydata/open-notebook.db
+    volumes:
+      - ./data/surreal:/mydata
+    networks:
+      - open-notebook
+    mem_limit: 512m
+    security_opt:
+      - no-new-privileges:true
+
+  # One container running three processes under supervisord: the Next.js UI
+  # (8502), the FastAPI backend (5055), and the worker that runs transformations
+  # and podcast generation.
+  open_notebook:
+    # Digest-pinned; upgrading is a deliberate edit of this line. Note the tag
+    # has no `v` prefix, and the `-single` variant is upstream-deprecated.
+    image: lfnovo/open_notebook:1.14.0@sha256:e53f90d6153fcf4a64604d9a0c12cb0428a32cfb8dbcbb72e81ab12c013ee330
+    restart: always
+    # OPEN_NOTEBOOK_ENCRYPTION_KEY and SURREAL_PASSWORD; see secrets.enc.env.example.
+    env_file: .env
+    environment:
+      # Not from env_file alone: unset, Open Notebook disables authentication
+      # entirely and serves every notebook — and the provider keys stored in
+      # them — to anyone who finds the hostname. `:?` fails the deploy instead.
+      # It doubles as the API bearer token.
+      - OPEN_NOTEBOOK_PASSWORD=${OPEN_NOTEBOOK_PASSWORD:?OPEN_NOTEBOOK_PASSWORD must be set in .env — Open Notebook disables auth without it}
+
+      - SURREAL_URL=ws://surrealdb:8000/rpc
+      - SURREAL_USER=root
+      - SURREAL_NAMESPACE=open_notebook
+      - SURREAL_DATABASE=open_notebook
+
+      # Next.js serves the UI and rewrites /api/* to the backend inside this
+      # container, so Traefik routes one port. Without API_URL the frontend
+      # derives the API's address from the request and points the browser at
+      # :5055, which is not published.
+      - API_URL=https://notebook.waqasali.dev
+
+      # Default is 5 concurrent background jobs, each an LLM or embedding call
+      # holding its document in memory. Two keeps a podcast rendering while a
+      # source is processed, without this container's 2g becoming the box's
+      # problem.
+      - OPEN_NOTEBOOK_WORKER_MAX_TASKS=2
+
+      # Deliberately not set: OPEN_NOTEBOOK_ENABLE_DOCLING (an ML parsing stack,
+      # models downloaded at first boot) and OPEN_NOTEBOOK_ENABLE_CRAWL4AI (a
+      # bundled Chromium). Both are GB-scale on a box with ~5 GB spare, and the
+      # built-in extractors already handle PDFs and web pages.
+
+      # Upstream's compose also sets SURREAL_EXPERIMENTAL_GRAPHQL on the
+      # database; the app never queries GraphQL, so it stays off here.
+    volumes:
+      - ./data/notebook:/app/data
+    depends_on:
+      - surrealdb
+    labels:
+      - traefik.enable=true
+      # traefik.yml defaults providers.docker.network to `edge`, so without this
+      # Traefik picks whichever network Go's map iteration yields first.
+      - traefik.docker.network=open-notebook
+      - traefik.http.routers.open-notebook.rule=Host(`notebook.waqasali.dev`)
+      - traefik.http.routers.open-notebook.tls.certresolver=le
+      - traefik.http.services.open-notebook.loadbalancer.server.port=8502
+      # Not admin-auth@file, unlike the other admin surfaces: the frontend calls
+      # its own API with `Authorization: Bearer <OPEN_NOTEBOOK_PASSWORD>`, and
+      # Traefik's basic auth rejects any Authorization header that is not Basic —
+      # the UI would load and every request from it would 401. The app's own
+      # password is the gate.
+    networks:
+      - open-notebook
+    mem_limit: 2g
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      # /health is one of the three endpoints the app leaves unauthenticated.
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:5055/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+networks:
+  open-notebook:
+    # Created by ops/provision.sh and shared with Traefik by stacks/traefik.
+    external: true

@@ -74,6 +74,12 @@ docker network inspect socket-proxy >/dev/null 2>&1 || docker network create --i
 # socket-proxy — the agent still needs the open web, it just loses the neighbours.
 docker network inspect assistant >/dev/null 2>&1 || docker network create assistant
 
+# Same idea for Open Notebook (projects/open-notebook): a third-party image that
+# fetches arbitrary URLs and parses documents nobody here wrote, with an LLM
+# deciding which. This network holds it, its SurrealDB — which authenticates
+# nothing a caller inside the perimeter would lack — and Traefik.
+docker network inspect open-notebook >/dev/null 2>&1 || docker network create open-notebook
+
 systemctl daemon-reload
 systemctl enable --now backup.timer docker-prune.timer
 
