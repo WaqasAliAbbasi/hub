@@ -20,7 +20,6 @@ services:
     # here, and `make platform` to recreate the container onto it.
     networks:
       - edge
-      - assistant
       - socket-proxy
     depends_on:
       - socket-proxy
@@ -60,8 +59,6 @@ volumes:
 
 networks:
   edge:
-    external: true
-  assistant:
     external: true
   socket-proxy:
     external: true
