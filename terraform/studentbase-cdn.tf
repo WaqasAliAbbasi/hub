@@ -22,6 +22,21 @@ resource "digitalocean_certificate" "studentbase_cdn" {
   }
 }
 
+# CAA at the apex covers the whole zone (api, content, www, ...) unless a
+# subdomain sets its own. Every cert here (Traefik's ACME on the apex/api,
+# DO's managed cert above for content) comes from Let's Encrypt, so this is
+# the only issuer that needs to be authorized. No issuewild — nothing here
+# issues wildcard certs.
+resource "digitalocean_record" "studentbase_caa_issue" {
+  domain = digitalocean_domain.studentbase.id
+  type   = "CAA"
+  name   = "@"
+  flags  = 0
+  tag    = "issue"
+  value  = "letsencrypt.org"
+  ttl    = 3600
+}
+
 resource "digitalocean_spaces_bucket" "studentbase_cdn" {
   name   = "sb-cdn-prod"
   region = "sgp1"
