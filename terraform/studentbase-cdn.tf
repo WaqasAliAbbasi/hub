@@ -6,11 +6,8 @@
 # Certificate is DO's own managed Let's Encrypt cert, not the acme provider — DO
 # renews it automatically, same as Traefik does for every other cert on this box.
 #
-# Cleanup still pending: the original uploaded cert from StudentBase's old Terraform
-# (`LetsEncryptTerraform8a0ff1bb`) is orphaned at DO, no longer referenced. Delete:
-#
-#   curl -X DELETE -H "Authorization: Bearer $DO_TOKEN" \
-#     https://api.digitalocean.com/v2/certificates/7d8c0447-f374-4db6-81c9-4f49cf5f5baf
+# The original uploaded cert from StudentBase's old Terraform
+# (`LetsEncryptTerraform8a0ff1bb`) was orphaned at DO; deleted 2026-10-12.
 
 resource "digitalocean_certificate" "studentbase_cdn" {
   name    = "studentbase-cdn"
