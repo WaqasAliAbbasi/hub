@@ -208,8 +208,7 @@ but Traefik. See `docs/new-project.md`.
 | Redis (capped `maxmemory 150mb`) | ~0.2 GB |
 | Dozzle | ~0.05 GB |
 | FreshRSS | ~0.3 GB |
-| ynab-mcp | ~0.15 GB |
-| **Subtotal** | **~2.3 GB** |
+| **Subtotal** | **~2.2 GB** |
 
 Running on a Hetzner **CX33** (4 vCPU / 8 GB, fsn1, ~€8/mo) for headroom — builds,
 Postgres restores, and traffic spikes all want it. A **CX22** (2 vCPU / 4 GB, ~€4.35/mo)

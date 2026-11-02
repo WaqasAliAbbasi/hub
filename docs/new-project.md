@@ -115,8 +115,16 @@ Commit them encrypted, next to the compose file that consumes them:
 make secrets FILE=projects/<project>/secrets.enc.env   # opens $EDITOR, encrypts on save
 ```
 
-Point the workflow at it with `secrets-path:` and pass `SOPS_AGE_KEY`, as
-`deploy-ynab-mcp.yml` does. On every deploy the workflow decrypts it to
+Point the workflow at it with `secrets-path:` and pass `SOPS_AGE_KEY`:
+
+```yaml
+    with:
+      secrets-path: projects/<project>/secrets.enc.env
+    secrets:
+      SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+```
+
+On every deploy the workflow decrypts it to
 `/srv/<project>/.env` at 0600, before `docker compose up`, so `env_file: .env` just works.
 
 This needs `make secrets-ci-init`, once ever, which mints a second age key scoped to
