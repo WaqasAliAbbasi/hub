@@ -1,0 +1,114 @@
+name: retire
+
+# The inverse of deploy.yml, run by hand: stops a project's containers and moves
+# /srv/<project> to /srv/.retired/<project>-<timestamp>. Deliberately manual —
+# a deploy is idempotent, a teardown isn't, and a deleted directory in git
+# (a bad rename, a botched rebase) must never be what wipes production data.
+#
+# Archived, not deleted: `mv` back and `docker compose up -d` undoes it. The
+# archive is outside the backup glob (/srv/*/data), so it drops out of new
+# snapshots; old ones keep it per restic's retention. Delete the archive by
+# hand once you're sure. See docs/new-project.md → "Retiring a project".
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: "Directory name under /srv on the box (e.g. ynab-mcp)"
+        required: true
+        type: string
+      confirm:
+        description: "Type the project name again to confirm"
+        required: true
+        type: string
+
+concurrency:
+  group: retire-${{ inputs.project }}
+  cancel-in-progress: false
+
+jobs:
+  retire:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check inputs
+        env:
+          PROJECT: ${{ inputs.project }}
+          CONFIRM: ${{ inputs.confirm }}
+          REF: ${{ github.ref }}
+          DEFAULT_REF: refs/heads/${{ github.event.repository.default_branch }}
+        run: |
+          set -eu
+          # Interpolated into a remote shell command below, so it must be a plain
+          # name — no slashes, dots, spaces or leading dashes.
+          if ! printf '%s' "$PROJECT" | grep -Eqx '[a-z0-9][a-z0-9-]*'; then
+            echo "project must match [a-z0-9][a-z0-9-]* — got '$PROJECT'" >&2; exit 1
+          fi
+          if [ "$PROJECT" != "$CONFIRM" ]; then
+            echo "confirm ('$CONFIRM') does not match project ('$PROJECT')" >&2; exit 1
+          fi
+          # /srv/platform is every stack in stacks/ — `make up` owns it, not this.
+          if [ "$PROJECT" = "platform" ]; then
+            echo "/srv/platform holds the platform stacks; take those down with make, not this" >&2; exit 1
+          fi
+          # Checked against the default branch, so a retire can't run from a
+          # branch where the project happens to be deleted already.
+          if [ "$REF" != "$DEFAULT_REF" ]; then
+            echo "run this from $DEFAULT_REF, not $REF" >&2; exit 1
+          fi
+          # Still in this repo means its deploy workflow is still live, and the
+          # next push to projects/$PROJECT would bring it straight back. Merge
+          # the removal first. (Projects in their own repos can't be checked from
+          # here — disable or delete their deploy workflow before retiring them.)
+          if [ -e "projects/$PROJECT" ] || [ -e ".github/workflows/deploy-$PROJECT.yml" ]; then
+            echo "projects/$PROJECT or deploy-$PROJECT.yml is still on $DEFAULT_REF — merge its removal first" >&2; exit 1
+          fi
+
+      - name: Stop and archive
+        env:
+          PROJECT: ${{ inputs.project }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          install -m 600 /dev/stdin ~/.ssh/id_deploy <<< "${{ secrets.HUB_SSH_KEY }}"
+          # Same pinned host key as deploy.yml.
+          echo "* ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDkA0BC46gKSRuDv+QLr7GLoBUhKlDJJtEyEoztQJc+W" > ~/.ssh/known_hosts
+          ssh_opts="-o StrictHostKeyChecking=yes -i ~/.ssh/id_deploy"
+
+          ssh $ssh_opts "deploy@${{ secrets.HUB_SSH_HOST }}" bash -s -- "$PROJECT" <<'EOF'
+          set -euo pipefail
+          p=$1
+          dir=/srv/$p
+          if [ ! -f "$dir/compose.yml" ]; then
+            echo "$dir/compose.yml not found — nothing to retire (already done?)" >&2
+            ls /srv >&2
+            exit 1
+          fi
+
+          cd "$dir"
+          echo "==> containers in $p:"
+          docker compose ps -a
+          # No -v: named volumes are kept, matching the archive-don't-delete rule.
+          # Images are left for the docker-prune timer.
+          docker compose down --remove-orphans
+          left=$(docker ps -aq --filter "label=com.docker.compose.project=$p")
+          if [ -n "$left" ]; then
+            echo "containers still labelled with project $p after down:" >&2
+            docker ps -a --filter "label=com.docker.compose.project=$p" >&2
+            exit 1
+          fi
+
+          # Decrypted secrets have no business outliving the service; the
+          # encrypted copy is in git history. Removed after `down`, since compose
+          # refuses to parse a file whose env_file is missing.
+          rm -f "$dir/.env"
+
+          cd /
+          mkdir -p /srv/.retired
+          dest=/srv/.retired/$p-$(date -u +%Y%m%dT%H%M%SZ)
+          mv "$dir" "$dest"
+          echo "==> $p stopped and archived to $dest"
+          du -sh "$dest" || true
+          echo "    undo:   mv $dest $dir   then redeploy (the .env is gone)"
+          echo "    delete: rm -rf $dest   (sudo if the container wrote files as another uid)"
+          EOF

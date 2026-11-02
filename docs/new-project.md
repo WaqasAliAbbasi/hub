@@ -197,3 +197,23 @@ Push to `main`. The workflow builds the image, pushes it to GHCR, copies `compos
 
 The app is live at `https://<project>.waqasali.dev` with a valid certificate, and every
 subsequent deploy is a `git push` — no SSH, no Terraform, no edit to `hub`.
+
+## Retiring a project
+
+1. **Remove it from git.** For a project in this repo, delete `projects/<project>/` and
+   its `deploy-<project>.yml`, then merge. For a project in its own repo, delete or
+   disable that repo's deploy workflow. Nothing is torn down yet: the containers keep
+   running until step 2.
+2. **Run the `retire` workflow** (Actions → retire → Run workflow, on `main`), typing
+   the project name twice. It stops the containers, deletes the decrypted `.env`, and
+   moves `/srv/<project>` to `/srv/.retired/<project>-<timestamp>`. It refuses to run
+   while the project is still in this repo.
+3. **Clean up outside the box:** DNS records, OAuth apps, API keys, and anything that
+   still points at the hostname.
+
+Retiring is deliberately manual. A deploy is safe to repeat; a teardown isn't, and an
+accidental `git rm` must never be what deletes production data. So the workflow archives
+instead of deleting. To undo, `mv` the folder back and redeploy. The archive sits outside
+the backup glob (`/srv/*/data`), so new snapshots skip it. Once you're sure, delete it by
+hand with `rm -rf /srv/.retired/<project>-*` (use `sudo` if the container wrote files as
+another uid).
